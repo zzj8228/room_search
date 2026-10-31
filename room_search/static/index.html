@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>教室查课 · 北京大学</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="seal" aria-hidden="true">燕</span><span>教室查课<small>PEKING UNIVERSITY</small></span></a>
+  <div class="side-label">校园学习工具</div>
+  <div class="nav-active"><span aria-hidden="true">▦</span> 教室课程检索 <span class="nav-dot"></span></div>
+  <div class="side-card"><span class="eyebrow">从地点找到课堂</span><p>在哪间教室，<br>遇见哪一门课。</p><small>按上课日期与北大节次查询<br>每一条课次独立保留</small></div>
+  <div class="side-bottom"><span class="online-dot"></span> PostgreSQL 独立数据库<p>课表来源：智云课堂<br>学期依据：校本部校历</p><a href="https://dean.pku.edu.cn/service/web/courseSearch.php" target="_blank" rel="noreferrer">教务部课程查询 ↗</a></div>
+</aside>
+<main>
+  <header class="topbar"><span>校园 / <strong>教室查课</strong></span><span id="today-label"></span></header>
+  <section class="intro"><div><div class="eyebrow">CLASSROOM EXPLORER</div><h1>这一刻，教室在上什么课？</h1><p>选择学期、日期和教室，查找对应时段的课程安排。</p></div><div class="intro-tag">日期决定学期<br><strong>12 个标准节次</strong></div></section>
+  <section class="stats" aria-label="数据库概览">
+    <div><span>有效课次</span><strong id="stat-lessons">—</strong><small>已排除默认教室</small></div>
+    <div><span>可检索教室</span><strong id="stat-rooms">—</strong><small>按实际地点归集</small></div>
+    <div><span>已导入日期</span><strong id="stat-days">—</strong><small id="stat-dates">正在读取数据库</small></div>
+  </section>
+  <section class="search-panel">
+    <div class="panel-heading"><h2><span aria-hidden="true">⌕</span> 设定查询条件</h2><span class="muted">北京时间 · UTC+8</span></div>
+    <form id="search-form">
+      <div class="fields">
+        <label>学期<select id="term" name="term"><option value="">全部学期</option></select></label>
+        <label>上课日期<input id="date" name="date" type="date" required></label>
+        <label>教学楼<select id="building" name="building"><option value="">全部教学楼</option></select></label>
+        <label>教室<select id="room" name="room"><option value="">全部教室</option></select></label>
+      </div>
+      <div class="time-row">
+        <label class="mode-field">查询时段<select id="mode" name="mode"><option value="all">全天课表</option><option value="period">按节次</option><option value="time">某个时刻</option><option value="range">时间范围</option></select></label>
+        <div id="period-fields" class="conditional" hidden><label>起始节次<select id="period-from" name="period_from"></select></label><span class="range-dash">至</span><label>结束节次<select id="period-to" name="period_to"></select></label></div>
+        <div id="time-fields" class="conditional" hidden><label>查询时刻<input id="time" name="time" type="time" value="10:30"></label></div>
+        <div id="range-fields" class="conditional" hidden><label>开始时间<input id="start" name="start" type="time" value="08:00"></label><span class="range-dash">至</span><label>结束时间<input id="end" name="end" type="time" value="12:00"></label></div>
+        <div class="search-actions"><button type="button" class="ghost" id="now">此时此刻</button><button type="submit" class="primary" id="search">查询课程 <span aria-hidden="true">→</span></button></div>
+      </div>
+    </form>
+    <div class="term-note" id="term-note">秋季、春季、夏季学期按实际日期划分，夏季使用暑期学校时间。</div>
+  </section>
+  <section class="period-panel" aria-label="北京大学课程节次">
+    <div class="period-title"><strong>北大作息时间</strong><span>点击节次快速筛选</span><button class="text-button" id="all-day">全天</button></div>
+    <div class="period-strip" id="periods"></div>
+    <p class="period-help">时刻查询仅匹配上课时间，课间不算正在上课；时间范围匹配与课堂时段有交集的课次。</p>
+  </section>
+  <section class="results-area" aria-live="polite" aria-busy="false" id="results-area">
+    <div class="results-heading"><div><h2>查询结果 <span id="result-count" class="count">—</span></h2><p id="result-caption">请选择条件后查询</p></div><div class="date-nav"><button id="previous-day" aria-label="前一天">←</button><button id="next-day" aria-label="后一天">→</button></div></div>
+    <div id="notice" class="notice" hidden></div>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div id="results"></div>
+    <div class="pagination" id="pagination" hidden><button class="ghost" id="previous-page">上一页</button><span id="page-label"></span><button class="ghost" id="next-page">下一页</button></div>
+  </section>
+  <section class="login-panel" aria-label="课表独立登录"><div><h3>教学网登录</h3><p id="auth-message" role="status">正在读取本软件的登录状态…</p><p>请在独立窗口登录；首次登录后点击“已完成登录”验证。离线查课无需登录。</p></div><div class="login-actions"><button class="ghost" id="auth-login">登录教学网</button><button class="ghost" id="auth-complete">已完成登录</button><button class="ghost" id="auth-logout">退出登录</button></div></section>
+  <section class="sync-panel"><div><h3>需要更新某天的课表？</h3><p>使用本软件的独立智云会话同步所选日期。搜索只读取本地数据库。</p><p id="sync-message" role="status"></p></div><button class="ghost" id="sync">同步所选日期</button></section>
+  <footer>课表记录不等于现场占用情况。未查询到课程，不代表教室空闲。<span>PKU CLASSROOM · 本地查询</span></footer>
+</main>
+</body>
+</html>
