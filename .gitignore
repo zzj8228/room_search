@@ -6,3 +6,9 @@ __pycache__/
 *.tmp
 .env
 .pip-cache/
+.tools/
+node_modules/
+.env.*
+!.env.example
+*.dump
+*.sql

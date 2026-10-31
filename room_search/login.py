@@ -15,7 +15,9 @@ STATE = {"status": "idle", "message": "同步课表前，请在本软件单独�
 
 
 def _browser(*arguments):
-    executable = shutil.which("agent-browser.cmd" if os.name == "nt" else "agent-browser")
+    command = "agent-browser.cmd" if os.name == "nt" else "agent-browser"
+    local = ROOT / ".tools/node_modules/.bin" / command
+    executable = str(local) if local.is_file() else shutil.which(command)
     if not executable:
         raise RuntimeError("未找到已安装的 agent-browser；离线查询仍可使用。")
     capture = arguments[:2] == ("cookies", "get")

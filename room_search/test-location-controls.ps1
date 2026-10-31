@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $taskBrowser = 'agent-browser.cmd'
 $taskSession = 'pku-classroom-location-regression'
 & $taskBrowser --session $taskSession open 'http://127.0.0.1:8766/?date=2026-10-21'
