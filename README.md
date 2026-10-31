@@ -6,7 +6,7 @@
 
 完整的系统要求、PostgreSQL 建库、独立登录、虚拟环境安装及故障排查见 [REQUIREMENTS.md](REQUIREMENTS.md)。Python 依赖统一使用 `requirements.txt`，并引用 `requirements-lock.txt` 中的确定版本。
 
-这是独立 Git 项目，根目录为 `D:/pku_resource/room_search`，无需 `pku_resource_gui` 源代码或其虚拟环境。所有 Python 命令均在本项目根目录运行。首次配置环境：
+本项目独立运行，所有 Python 命令均在项目根目录运行。首次配置环境：
 
 ```powershell
 .\setup.ps1
@@ -36,8 +36,6 @@
 
 本项目所有运行数据保存在 `data/`；数据库连接为 `data/auth/postgres.dpapi`，教学网会话为 `data/auth/pku-browser-state.dpapi`，均由当前 Windows 用户的 DPAPI 加密。`PKU_CLASSROOM_DATA_DIR` 可重设本项目数据目录。不会读取回放软件的配置、Cookie、JWT、浏览器配置或环境变量。
 
-迁移时仅复制旧课表模块专用数据库 `pku_classroom` 的连接配置；数据库及课表数据保留，没有复制校园认证数据。当前课表库共 120,382 条课次、305 个教室、415 个已覆盖日期，课次日期为 2025-09-08 至 2026-10-27。
-
 新机器可连接一个独立的空数据库（连接串隐藏输入）：
 
 ```powershell
@@ -46,7 +44,7 @@
 
 也可只在当前 PowerShell 进程设置 `PKU_CLASSROOM_DATABASE_URL`。创建新数据库时，显式提供 `PKU_CLASSROOM_ADMIN_DATABASE_URL` 后执行 `classroom.py create-database --name pku_classroom`；不从其他项目取得连接。目标库若存在回放表，配置命令会拒绝保存。
 
-离线复制回放库数据是可选的一次性引导步骤：仅在当前进程显式配置 `PKU_CLASSROOM_IMPORT_DATABASE_URL`，再执行 `classroom.py import-existing`。源和目标必须是不同数据库，不保存源库连接、不自动寻找旧项目，不需要导入即可使用现有课表库。迁移本身没有修改源回放库。
+离线复制回放库数据是可选的一次性引导步骤：仅在当前进程显式配置 `PKU_CLASSROOM_IMPORT_DATABASE_URL`，再执行 `classroom.py import-existing`。源和目标必须是不同数据库，不保存源库连接、不自动寻找旧项目。
 
 导入时原库事务为 `REPEATABLE READ READ ONLY`，只读取课程名、教师、院系、课次 ID、日期、课次标题和地点，以及日期覆盖标记。**不复制密码、Cookie、JWT、回放地址或视频。** 当前仅复制 `semesters.json` 中最早已配置教学期（2025-09-08）之后的数据。
 
@@ -122,7 +120,6 @@
 
 当前数据库是智云目录的覆盖范围，不能保证包含智云没有收录的课程或线下临时调课。[教务部](https://dean.pku.edu.cn/service/web/courseSearch.php)和[选课系统](https://elective.pku.edu.cn)是补充核对入口，本版本没有把它们的学期周课表按假定周次展开成实际日期。
 
-目前未在新项目中登录校园账号，因此未宣称最近日期的在线同步成功。离线数据截至 2026-10-27；后续数据须在本软件独立登录后同步。
 ## API
 
 - `GET /api/auth/status`：本项目会话状态，不返回 Cookie/令牌。
@@ -137,17 +134,7 @@
 
 仅监听 `127.0.0.1`，校验 Host、Origin、跨站请求；无跨站 CORS。前端用文本节点展示来源数据，不将课程名称当 HTML 执行。此版本为本机工具，不提供公网多用户认证。
 
-## 验证
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest room_search.test_classroom room_search.test_independence -v
-node --check room_search/static/app.js
-.\room_search\test-location-controls.ps1
-```
-
-19 项自动化测试使用新库中的随机临时 schema，结束时仅删除自己生成的 schema。覆盖学期边界、夏季短学期、忽略旧学期标签、默认地点变体、课间与端点、跨节次范围、字面量关键词、跨学期隔离、空日期覆盖、事务回滚、重复导入、并发建表、HTTP 同源、项目路径隔离、DPAPI 往返、独立浏览器会话及认证失败不保存。浏览器回归检查教室列表随教学楼更新。
-
-## 项目结构与迁移
+## 项目结构
 
 - `classroom.py`：CLI；`start-classroom.cmd` / `.ps1`：本机启动器。
 - `room_search/model.py`、`semesters.json`：日期学期、节次、教室规范化。
@@ -156,4 +143,4 @@ node --check room_search/static/app.js
 - `room_search/server.py`、`static/`：本机 API 与中文界面。
 - `data/`、`.venv/`：本机私有数据和虚拟环境，均被 Git 忽略。
 
-迁移记录见 [MIGRATION.md](MIGRATION.md)。仓库只记录代码、文档及依赖锁定文件，不提交运行日志、数据库连接、Cookie、令牌或虚拟环境。
+仓库只记录运行代码、使用文档及依赖锁定文件。

@@ -6,12 +6,12 @@
 
 | 组件 | 要求与用途 |
 | --- | --- |
-| Python | 3.13 x64，已验证 3.13.5；应用依赖仅装入项目 `.venv` |
-| PostgreSQL | 已验证 18.4；数据库可在本机或其他可连接服务器，不在 pip 中安装 |
+| Python | 3.13 x64；应用依赖仅装入项目 `.venv` |
+| PostgreSQL | 推荐 18.4；数据库可在本机或其他可连接服务器，不在 pip 中安装 |
 | Git | 克隆与更新代码；下载源码 ZIP 时可不用 |
 | 浏览器 | Edge、Chrome 等，用于访问本机查课页面 |
-| agent-browser | 官方登录时需要，已验证 0.39.1；离线搜索无需此工具 |
-| Node.js / npm | 仅安装或运行浏览器工具、检查前端 JS 时需要；agent-browser 0.39.1 声明要求 Node.js 24+ |
+| agent-browser | 官方登录时需要，使用 0.39.1；离线搜索无需此工具 |
+| Node.js / npm | 仅安装或运行浏览器工具时需要；agent-browser 0.39.1 声明要求 Node.js 24+ |
 | 校园网络 | 登录教学网、智云 SSO、同步目录时需要；查询已有数据只需连接 PostgreSQL |
 
 Python 依赖文件：`requirements.txt` 引用 `requirements-lock.txt`。锁定版本为 `psycopg==3.3.6`、`psycopg-binary==3.3.6`、`tzdata==2026.6`。后端其余功能使用 Python 标准库，前端为原生 HTML/CSS/JavaScript，不需要前端构建。
@@ -102,7 +102,7 @@ npm.cmd --prefix .tools install --save-exact --no-audit --no-fund agent-browser@
 
 第一条命令将 npm 包安装到项目 `.tools/`，应用优先发现其中的 CLI；没有该文件才查找 PATH 中已有 CLI。第二条命令安装工具所需的浏览器资产，资产使用工具自身管理的用户缓存；不会安装全局 npm 包或改系统 PATH。若需完全限制安装目录，可先使用已有浏览器工具，或依据该工具对应版本的说明配置其浏览器位置。
 
-本机现有环境不需要运行这两条命令。离线查询、首次建表和数据库配置都不依赖 Node.js 或 agent-browser。
+离线查询、首次建表和数据库配置都不依赖 Node.js 或 agent-browser。
 
 1. 在查课页面点击“登录教学网”，打开本项目专属的官方登录窗口。
 2. 在官方窗口完成登录，再返回查课页面点击“已完成登录”。
@@ -125,33 +125,6 @@ Remove-Item Env:PKU_CLASSROOM_IMPORT_DATABASE_URL -ErrorAction SilentlyContinue
 ```
 
 源连接应使用具有这些表读取权限的账号；导入事务为只读。目标和源必须是不同数据库。不复制媒体链接或认证数据。学期按课次日期重算，默认教室丢弃；默认只导入已配置校历最早日期及以后的数据。完整规则见 README。
-
-## 7. 验证安装
-
-```powershell
-.\.venv\Scripts\python.exe -m pip check
-.\.venv\Scripts\python.exe classroom.py --help
-Invoke-RestMethod http://127.0.0.1:8766/api/meta
-```
-
-`/api/meta` 应返回 `application: pku-classroom`，新库的课次数可以为零。数据库配置后可执行完整测试；测试只创建和清理新生成的临时 schema：
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest room_search.test_classroom room_search.test_independence -v
-```
-
-仅运行 Python 逻辑测试、不连接 PostgreSQL：
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest room_search.test_classroom.ModelTests room_search.test_independence -v
-```
-
-前端语法检查可运行 `node --check room_search/static/app.js`；教室联动回归脚本 `room_search/test-location-controls.ps1` 还需要服务运行和 `agent-browser.cmd` 在当前进程 PATH 中。项目内安装工具时，仅对当前 PowerShell 会话添加路径：
-
-```powershell
-$env:PATH = (Join-Path $PWD '.tools/node_modules/.bin') + ';' + $env:PATH
-.\room_search\test-location-controls.ps1
-```
 
 ## 常见问题
 

@@ -12,3 +12,7 @@ node_modules/
 !.env.example
 *.dump
 *.sql
+/MIGRATION.md
+/tests/
+/room_search/test_*.py
+/room_search/test-*.ps1
