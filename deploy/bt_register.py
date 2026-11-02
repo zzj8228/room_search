@@ -37,7 +37,8 @@ def runtime_environment():
               "PKU_CLASSROOM_REMOTE_LOGIN": "1",
               "PKU_CLASSROOM_BROWSER_EXECUTABLE": str(CODE / "browser/chrome"),
               "PATH": str(CODE / ".tools/bin") + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
-    target = PRIVATE / "bt-runtime.env"
+    # The TLS/Basic-Auth directory belongs to Nginx; the application cannot traverse it.
+    target = RUNTIME / "bt-runtime.env"
     target.write_text("umask 077\n" + "".join("export " + key + "=" + shlex.quote(value) + "\n"
                                               for key, value in values.items()))
     os.chown(target, 0, grp.getgrnam("roomsearch").gr_gid)
@@ -144,6 +145,8 @@ def register():
             raise RuntimeError("读取宝塔项目配置失败。")
         if config.get("project_cmd") != get.project_cmd or config.get("user") != "roomsearch":
             raise RuntimeError("现有宝塔项目启动配置与本项目不一致，未覆盖。")
+        config["env_file"] = str(environment)
+        public.M("sites").where("name=?", (PROJECT,)).update({"project_config": json.dumps(config)})
         model._main__prepare_start_conf(config, force=True)
         # Native BT scripts must be readable/traversable by the existing service account.
         generated_env = Path(model._env_path) / (PROJECT + ".env")
