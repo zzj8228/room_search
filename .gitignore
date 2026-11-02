@@ -15,6 +15,17 @@ node_modules/
 !.env.example
 *.dump
 *.sql
+# Machine-specific credentials and scripts containing private configuration.
+*_secrets.py
+*_credentials.py
+*.local.py
+local_config.py
+secrets.py
+credentials.py
+*.key
+*.pem
+.ssh/
+/browser/
 /MIGRATION.md
 /tests/
 /room_search/test_*.py

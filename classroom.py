@@ -17,6 +17,8 @@ def main():
     commands.add_parser("import-session", help="从标准输入导入本项目的教学网会话，仅供管理员通过 SSH 使用")
     commands.add_parser("import-existing", help="离线导入现有 PostgreSQL 课次库；不修改回放表")
     commands.add_parser("reclassify", help="校历修改后，按日期重算所有已存课次的学期")
+    repair = commands.add_parser("repair-departments", help="按同一课程 ID 补全已有课次的空院系")
+    repair.add_argument("--online", action="store_true", help="使用本人已有登录态，查询排课接口补全其余院系")
     commands.add_parser("configure-database", help="单独输入并加密保存课表数据库连接")
     create = commands.add_parser("create-database", help="创建独立 PostgreSQL 数据库并加密保存连接")
     create.add_argument("--name", default="pku_classroom")
@@ -50,6 +52,13 @@ def main():
         print(json.dumps(store.import_existing(), ensure_ascii=False), flush=True)
     elif args.command == "reclassify":
         print(json.dumps(store.reclassify(), ensure_ascii=False), flush=True)
+    elif args.command == "repair-departments":
+        if args.online:
+            from room_search.sync import repair_departments
+            result = repair_departments(lambda message: print(message, flush=True))
+        else:
+            result = store.repair_departments()
+        print(json.dumps(result, ensure_ascii=False), flush=True)
     elif args.command == "sync":
         from room_search.sync import sync_day
         start, end = args.start, args.end or args.start

@@ -182,6 +182,9 @@ async function sync() {
       if (status.status === "done") {
         done = true; await refreshMeta();
         $("sync-message").textContent = date + " 已同步：" + status.result.accepted + " 条有效课次，" + (status.result.excluded.placeholder_room || 0) + " 条默认教室已舍弃。";
+        if (status.result.departments?.missing_lessons) {
+          $("sync-message").textContent += " " + status.result.departments.missing_lessons + " 条课次的院系待补充，可在登录有效时重新同步。";
+        }
         await search();
       }
     }

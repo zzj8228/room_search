@@ -73,6 +73,52 @@ def _write(conn, normalized):
     conn.execute("DROP TABLE incoming")
 
 
+def _known_departments(conn, course_ids=None):
+    condition, params = "", []
+    if course_ids is not None:
+        if not course_ids:
+            return {}
+        condition = " AND course_id=ANY(%s)"
+        params = [list(course_ids)]
+    rows = conn.execute(f"""SELECT course_id,min(btrim(department)) AS department
+        FROM {S}.lessons WHERE nullif(btrim(department),'') IS NOT NULL {condition}
+        GROUP BY course_id HAVING count(DISTINCT btrim(department))=1""", params).fetchall()
+    return {row["course_id"]: row["department"] for row in rows}
+
+
+def known_departments(course_ids):
+    """Only reuse an unambiguous department for the exact same course ID."""
+    with db.connection() as conn:
+        return _known_departments(conn, course_ids)
+
+
+def missing_department_courses():
+    with db.connection() as conn:
+        return [row["course_id"] for row in conn.execute(f"""SELECT DISTINCT course_id
+            FROM {S}.lessons WHERE nullif(btrim(department),'') IS NULL ORDER BY course_id""")]
+
+
+def repair_departments(departments=None):
+    """Fill empty fields only; never infer departments from course names or teachers."""
+    with db.connection() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("classroom-data:" + SCHEMA,))
+        updated = conn.execute(f"""WITH known AS (
+            SELECT course_id,min(btrim(department)) AS department FROM {S}.lessons
+            WHERE nullif(btrim(department),'') IS NOT NULL GROUP BY course_id
+            HAVING count(DISTINCT btrim(department))=1)
+            UPDATE {S}.lessons l SET department=k.department FROM known k
+            WHERE l.course_id=k.course_id AND nullif(btrim(l.department),'') IS NULL""").rowcount
+        for course_id, department in (departments or {}).items():
+            if not isinstance(department, str) or not department.strip():
+                continue
+            updated += conn.execute(f"""UPDATE {S}.lessons SET department=%s
+                WHERE course_id=%s AND nullif(btrim(department),'') IS NULL""",
+                (department.strip(), str(course_id))).rowcount
+        remaining = conn.execute(f"""SELECT count(*) AS n FROM {S}.lessons
+            WHERE nullif(btrim(department),'') IS NULL""").fetchone()["n"]
+    return {"updated": updated, "remaining": remaining}
+
+
 def save_day(day, rows, term_labels=None, source="zhiyun"):
     normalized, excluded = {}, Counter()
     for row in rows:
@@ -88,6 +134,11 @@ def save_day(day, rows, term_labels=None, source="zhiyun"):
     with db.connection() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("classroom-data:" + SCHEMA,))
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("pku-room-day:" + str(day),))
+        # Read before replacement so a blank platform value cannot erase the only saved department.
+        known = _known_departments(conn, {row["course_id"] for row in values})
+        for row in values:
+            if not row["department"].strip():
+                row["department"] = known.get(row["course_id"], "")
         # An authoritative, successful day replaces its previous classroom snapshot atomically.
         conn.execute(f"DELETE FROM {S}.lessons WHERE lesson_date=%s AND source='zhiyun'", (day,))
         _write(conn, values)

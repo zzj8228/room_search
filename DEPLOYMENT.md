@@ -93,7 +93,26 @@ sudo -u roomsearch pg_dump -Fc --no-owner --no-acl \
   --schema=pku_room_search pku_classroom > classroom.dump
 ```
 
-更新代码：先私下备份数据库，在 `/opt/room-search` 更新运行代码和依赖，再重启两个应用服务。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
+当前服务器的 `/opt/room-search` 已登记为 Git 工作目录。更新时先在本地修改、验证并推送 GitHub，再在服务器备份并拉取。以下命令均在服务器执行：
+
+```bash
+# 私有备份不放进项目目录或 GitHub
+sudo install -d -m 700 /var/backups/room-search
+sudo sh -c 'umask 077; sudo -u roomsearch pg_dump -Fc --no-owner --no-acl --schema=pku_room_search pku_classroom > /var/backups/room-search/before-update-$(date +%Y%m%d-%H%M%S).dump'
+
+sudo git -C /opt/room-search status --short
+sudo git -C /opt/room-search pull --ff-only origin main
+# 仅在 requirements*.txt 变化时更新依赖
+# sudo /opt/room-search/.venv/bin/pip install -r /opt/room-search/requirements.txt
+sudo -u roomsearch env PKU_CLASSROOM_DATABASE_URL='host=/var/run/postgresql dbname=pku_classroom user=roomsearch' \
+  /opt/room-search/.venv/bin/python /opt/room-search/classroom.py repair-departments
+sudo systemctl restart room-search room-search-admin
+curl --fail http://127.0.0.1:8766/api/meta
+```
+
+如果 `git status` 显示服务器源码被修改，先核对差异，不要使用强制覆盖。原安装脚本复制文件形成的新部署需要先核对已部署文件，再将运行目录登记为 Git 工作目录；不能直接覆盖已有配置。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
+
+`repair-departments` 离线补齐同一课程已有院系，无法推断的记录仍留空。管理员在网站完成教学网登录后，可重新同步受影响日期；也可在上方环境变量命令后为 `repair-departments` 添加 `--online`，并同时设置 `PKU_CLASSROOM_DATA_DIR=/var/lib/room-search`，只查询排课接口补全历史空院系。不要在终端粘贴 Cookie 或 JWT。
 
 仓库提供可选的 `room-search-sync.timer`，默认不启用；按需启用后在北京时间 06:30、12:30、19:30 更新昨日、今日和明日目录。过期会话需要管理员重新登录，任务失败保留原课表。
 
