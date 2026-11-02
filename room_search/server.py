@@ -1,4 +1,4 @@
-"""Loopback-only browser application; search never contacts campus services."""
+"""Browser application with an optional read-only campus deployment mode."""
 from __future__ import annotations
 
 import datetime as dt
@@ -47,10 +47,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def local_request(self, write=False):
         port = self.server.server_port
         host = self.headers.get("Host", "")
-        if host not in (f"127.0.0.1:{port}", f"localhost:{port}"):
+        public_origin = getattr(self.server, "public_origin", None)
+        site_origin = public_origin or getattr(self.server, "admin_origin", None)
+        if write and public_origin:
+            return False
+        allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        allowed_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        if site_origin:
+            allowed_hosts.add(urllib.parse.urlsplit(site_origin).netloc)
+            allowed_origins.add(site_origin)
+        if host not in allowed_hosts:
             return False
         origin = self.headers.get("Origin")
-        if origin and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+        if origin and origin not in allowed_origins:
             return False
         return self.headers.get("Sec-Fetch-Site") != "cross-site"
 
@@ -82,7 +91,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         query = {k: v[0] for k, v in urllib.parse.parse_qs(url.query, keep_blank_values=True).items()}
         try:
             if url.path == "/api/meta":
-                return self.send(200, {**store.meta(), "today": today(), "application": "pku-classroom"})
+                return self.send(200, {**store.meta(), "today": today(), "application": "pku-classroom",
+                                       "readOnly": bool(getattr(self.server, "public_origin", None))})
+            if getattr(self.server, "public_origin", None) and url.path in ("/api/auth/status", "/api/job"):
+                return self.send(404, {"error": "管理功能请通过服务器命令行使用。"})
             if url.path == "/api/auth/status":
                 from . import login
                 return self.send(200, login.status())
@@ -107,6 +119,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.local_request(write=True):
+            # Consume a small rejected body before closing, so Windows clients
+            # receive the HTTP error instead of an unread-body TCP reset.
+            try:
+                size = int(self.headers.get("Content-Length", "0"))
+                if 0 < size <= 4096:
+                    self.connection.settimeout(5)
+                    self.rfile.read(size)
+            except (ValueError, OSError):
+                pass
             return self.send(403, {"error": "仅允许本机同源访问。"})
         if self.path not in ("/api/sync", "/api/auth/login", "/api/auth/complete", "/api/auth/logout"):
             return self.send(404, {"error": "接口不存在。"})
@@ -130,9 +151,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(400, {"error": str(error) if isinstance(error, ValueError) else "日期无效。"})
 
 
-def serve(port=8766):
+def serve(port=8766, public_origin=None, admin_origin=None):
+    if public_origin and admin_origin:
+        raise ValueError("公开只读模式和管理模式不能同时启用。")
+    site_origin = public_origin or admin_origin
+    if site_origin:
+        parsed = urllib.parse.urlsplit(site_origin)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username
+                or parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+            raise ValueError("公开地址必须为完整的 HTTP/HTTPS 来源地址。")
+    public_origin = public_origin.rstrip("/") if public_origin else None
+    admin_origin = admin_origin.rstrip("/") if admin_origin else None
     store.init_schema()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server.public_origin = public_origin
+    server.admin_origin = admin_origin
     print(f"教室查课：http://127.0.0.1:{server.server_port}", flush=True)
     try:
         server.serve_forever()

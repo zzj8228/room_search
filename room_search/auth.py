@@ -1,4 +1,4 @@
-"""Account-scoped official PKU SSO and current-user DPAPI session storage."""
+"""Official PKU SSO with Windows DPAPI or an owner-only Linux encryption key."""
 from __future__ import annotations
 
 import base64
@@ -30,6 +30,8 @@ class AuthError(RuntimeError):
 
 
 def dpapi(data: bytes, decrypt=False) -> bytes:
+    if os.name != "nt":
+        return unix_secret(data, decrypt)
     class Blob(ctypes.Structure):
         _fields_ = [("size", ctypes.c_uint32), ("data", ctypes.POINTER(ctypes.c_ubyte))]
 
@@ -56,6 +58,30 @@ def dpapi(data: bytes, decrypt=False) -> bytes:
         return ctypes.string_at(target.data, target.size)
     finally:
         kernel.LocalFree(ctypes.cast(target.data, ctypes.c_void_p))
+
+
+def unix_secret(data: bytes, decrypt=False) -> bytes:
+    from cryptography.fernet import Fernet, InvalidToken
+    directory = runtime_dir() / "auth"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(directory, 0o700)
+    key_path = directory / "secret.key"
+    if not key_path.exists() and not decrypt:
+        try:
+            fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(Fernet.generate_key())
+    try:
+        stat = key_path.stat()
+        if stat.st_uid != os.getuid() or stat.st_mode & 0o077:
+            raise AuthError("session_unreadable", "会话密钥必须属于当前用户且权限为 600。")
+        cipher = Fernet(key_path.read_bytes())
+        return cipher.decrypt(data) if decrypt else cipher.encrypt(data)
+    except (OSError, ValueError, InvalidToken):
+        raise AuthError("session_unreadable", "无法读取加密会话，请保留本机密钥或重新登录。") from None
 
 
 def load_state(path=None):

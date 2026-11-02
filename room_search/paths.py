@@ -1,8 +1,9 @@
 """All writable state belongs to this project, never the replay app."""
 import os
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 
 
 def runtime_dir():

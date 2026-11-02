@@ -3,11 +3,14 @@ const $ = (id) => document.getElementById(id);
 const state = {meta: null, page: 1, response: null, sequence: 0, locations: [], syncing: false};
 const urlState = new URLSearchParams(location.search);
 const number = (n) => new Intl.NumberFormat("zh-CN").format(n);
+const adminPage = location.pathname.startsWith("/admin/");
+const pageBase = adminPage ? "/admin/" : "/";
 function element(tag, cls, content) {
   const node = document.createElement(tag); if (cls) node.className = cls;
   if (content !== undefined) node.textContent = content; return node;
 }
 async function api(path, options) {
+  if (adminPage && path.startsWith("/api/")) path = "/admin" + path;
   const response = await fetch(path, options);
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || "查询失败，请稍后重试。");
@@ -142,7 +145,7 @@ async function search(page = 1) {
     const data = await api("/api/search?" + params);
     if (seq !== state.sequence) return;
     state.response = data;
-    history.replaceState(null, "", "/?" + params);
+    history.replaceState(null, "", pageBase + "?" + params);
     $("result-count").textContent = number(data.total) + " 课次";
     $("result-caption").textContent = $("date").value + " · " + ($("building").value || "全部教学楼") + " · " + ($("room").value || "全部教室");
     renderNotice(data); renderRows(data);
@@ -186,20 +189,28 @@ async function sync() {
   finally { state.syncing = false; $("sync").disabled = false; }
 }
 function renderAuth(data) {
-  const busy = ["opening", "verifying", "logging_out"].includes(data.status);
+  const busy = ["opening", "verifying", "logging_out"].includes(data.status) || (data.remoteLogin && data.status === "waiting");
   $("auth-message").textContent = data.status === "idle" && data.auth.saved ? data.auth.message : data.message;
   for (const id of ["auth-login", "auth-complete", "auth-logout"]) $(id).disabled = busy;
   return busy;
 }
 async function authAction(action) {
+  let popup = null;
+  if (adminPage && action === "login") popup = window.open("about:blank", "pku-official-login", "width=1280,height=850");
   for (const id of ["auth-login", "auth-complete", "auth-logout"]) $(id).disabled = true;
   try {
     let data = await api("/api/auth/" + action, {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
+    if (popup && data.loginUrl) popup.location.replace(data.loginUrl);
     while (renderAuth(data)) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       data = await api("/api/auth/status");
     }
+    if (data.status === "done" && ["login", "complete"].includes(action)) {
+      if (popup && !popup.closed) popup.close();
+      await sync();
+    }
   } catch (error) {
+    if (popup && !popup.closed) popup.close();
     $("auth-message").textContent = error.message;
   } finally {
     for (const id of ["auth-login", "auth-complete", "auth-logout"]) $(id).disabled = false;
@@ -209,7 +220,6 @@ async function init() {
   for (const [id, action] of [["auth-login", "login"], ["auth-complete", "complete"], ["auth-logout", "logout"]]) {
     $(id).addEventListener("click", () => authAction(action));
   }
-  api("/api/auth/status").then(renderAuth).catch((error) => {$("auth-message").textContent = error.message;});
   $("search-form").addEventListener("submit", (e) => {e.preventDefault(); search();});
   $("mode").addEventListener("change", modeChanged);
   $("period-from").addEventListener("change", () => {if (+$("period-to").value < +$("period-from").value) $("period-to").value = $("period-from").value; modeChanged();});
@@ -241,6 +251,12 @@ async function init() {
   $("sync").addEventListener("click", sync);
   try {
     const meta = await api("/api/meta");
+    document.querySelectorAll(".login-panel,.sync-panel").forEach((panel) => {panel.hidden = meta.readOnly;});
+    if (adminPage) {
+      document.title = "课表管理 · 北京大学";
+      document.querySelector(".login-panel p:nth-of-type(2)").textContent = "点击登录教学网，在弹窗内完成官方登录；校验通过后自动关闭弹窗、保存会话并同步所选日期。";
+    }
+    if (!meta.readOnly) api("/api/auth/status").then(renderAuth).catch((error) => {$("auth-message").textContent = error.message;});
     for (const p of meta.periods) {
       $("period-from").add(new Option("第 " + p.number + " 节", p.number));
       $("period-to").add(new Option("第 " + p.number + " 节", p.number));

@@ -1,0 +1,10 @@
+[Unit]
+Description=PKU classroom refresh at Beijing time
+
+[Timer]
+OnCalendar=*-*-* 06,12,19:30:00 Asia/Shanghai
+Persistent=true
+Unit=room-search-sync.service
+
+[Install]
+WantedBy=timers.target

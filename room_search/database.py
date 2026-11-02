@@ -40,7 +40,7 @@ def save_configuration(value):
         temporary.replace(CONFIG)
     finally:
         temporary.unlink(missing_ok=True)
-    return {"database": name, "configuration": "Windows DPAPI"}
+    return {"database": name, "configuration": "Windows DPAPI" if os.name == "nt" else "Linux Fernet"}
 
 
 def source_connection_url():

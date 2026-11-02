@@ -1,4 +1,7 @@
 .venv/
+.build-venv/
+build/
+dist/
 data/
 __pycache__/
 *.py[cod]

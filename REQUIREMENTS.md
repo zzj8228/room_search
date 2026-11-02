@@ -1,6 +1,6 @@
 # 环境要求与安装配置
 
-本软件当前面向 **Windows 10/11 x64、Python 3.13**。数据库和校园登录凭证使用 Windows DPAPI；macOS、Linux 尚未适配。所有命令在项目根目录运行，以下以 PowerShell 为例。
+本地源码运行面向 **Windows 10/11 x64、Python 3.13**；也提供自带运行时的 `RoomSearch.exe` 和 **Ubuntu 24.04 / Python 3.12** 服务器部署。EXE 与 Linux 的运行方法见 [DEPLOYMENT.md](DEPLOYMENT.md)。Windows 数据库和校园登录凭证使用 DPAPI，Linux 会话使用专用用户密钥加密。以下主要介绍 Windows 源码环境，所有命令在项目根目录运行。
 
 ## 需要哪些环境
 

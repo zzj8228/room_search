@@ -1,0 +1,7 @@
+abi <abi/4.0>,
+include <tunables/global>
+
+# Root-owned executable only; retain Chrome's namespace sandbox on Ubuntu 24.04.
+profile room-search-chrome /opt/room-search/browser/chrome flags=(unconfined) {
+    userns,
+}

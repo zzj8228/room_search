@@ -1,0 +1,28 @@
+[Unit]
+Description=PKU classroom administrator and official login
+After=network.target postgresql.service room-search-desktop.service
+Requires=postgresql.service room-search-desktop.service
+
+[Service]
+User=roomsearch
+Group=roomsearch
+WorkingDirectory=/opt/room-search
+Environment=HOME=/var/lib/room-search
+Environment=DISPLAY=:99
+Environment=PATH=/opt/room-search/.tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment="PKU_CLASSROOM_DATABASE_URL=host=/var/run/postgresql dbname=pku_classroom user=roomsearch"
+Environment=PKU_CLASSROOM_DATA_DIR=/var/lib/room-search
+Environment=PKU_CLASSROOM_REMOTE_LOGIN=1
+Environment=PKU_CLASSROOM_BROWSER_EXECUTABLE=/opt/room-search/browser/chrome
+ExecStart=/opt/room-search/.venv/bin/python classroom.py serve --port 8767 --admin-origin https://10.129.81.32
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/room-search /tmp
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target

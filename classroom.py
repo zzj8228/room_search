@@ -12,6 +12,9 @@ def main():
     commands = parser.add_subparsers(dest="command")
     server = commands.add_parser("serve", help="启动搜索软件")
     server.add_argument("--port", type=int, default=8766)
+    server.add_argument("--public-origin", help="只读校园网网站地址；由 Nginx 反向代理，管理接口关闭")
+    server.add_argument("--admin-origin", help="受 Nginx 认证保护的 HTTPS 管理站点地址")
+    commands.add_parser("import-session", help="从标准输入导入本项目的教学网会话，仅供管理员通过 SSH 使用")
     commands.add_parser("import-existing", help="离线导入现有 PostgreSQL 课次库；不修改回放表")
     commands.add_parser("reclassify", help="校历修改后，按日期重算所有已存课次的学期")
     commands.add_parser("configure-database", help="单独输入并加密保存课表数据库连接")
@@ -21,6 +24,15 @@ def main():
     sync.add_argument("--from", dest="start", type=dt.date.fromisoformat, default=today())
     sync.add_argument("--to", dest="end", type=dt.date.fromisoformat)
     args = parser.parse_args()
+    if args.command == "import-session":
+        import sys
+        from room_search.auth import import_browser_cookies
+        value = sys.stdin.read(2 * 1024 * 1024 + 1)
+        if len(value) > 2 * 1024 * 1024:
+            raise ValueError("会话数据过大。")
+        state = json.loads(value)
+        print(json.dumps(import_browser_cookies(state["cookies"]), ensure_ascii=False))
+        return
     if args.command == "configure-database":
         import getpass
         from room_search.database import save_configuration
@@ -32,7 +44,7 @@ def main():
         return
     if args.command in (None, "serve"):
         from room_search.server import serve
-        return serve(getattr(args, "port", 8766))
+        return serve(getattr(args, "port", 8766), getattr(args, "public_origin", None), getattr(args, "admin_origin", None))
     store.init_schema()
     if args.command == "import-existing":
         print(json.dumps(store.import_existing(), ensure_ascii=False), flush=True)
