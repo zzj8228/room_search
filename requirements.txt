@@ -1,3 +1,8 @@
-# Reproducible Windows / Python 3.13 environment.
-# Install only with .venv/Scripts/python.exe -m pip install -r requirements.txt
--r requirements-lock.txt
+# Pinned dependencies for Windows Python 3.13 and Ubuntu Python 3.12.
+psycopg==3.3.6
+psycopg-binary==3.3.6
+tzdata==2026.6
+cryptography==46.0.7; sys_platform != "win32"
+cffi==2.0.0; sys_platform != "win32"
+pycparser==2.23; sys_platform != "win32"
+typing-extensions==4.16.0; python_version < "3.13"

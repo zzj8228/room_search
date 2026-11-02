@@ -4,7 +4,9 @@ import os
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 root = Path(SPECPATH)
-browser = Path(os.environ.get('APPDATA', '')) / 'npm/node_modules/agent-browser/bin/agent-browser-win32-x64.exe'
+browser = root / '.tools/node_modules/agent-browser/bin/agent-browser-win32-x64.exe'
+if not browser.is_file():
+    browser = Path(os.environ.get('APPDATA', '')) / 'npm/node_modules/agent-browser/bin/agent-browser-win32-x64.exe'
 if not browser.is_file():
     raise SystemExit('Build requires agent-browser 0.39.1 native Windows binary.')
 psycopg_data, psycopg_binaries, psycopg_imports = collect_all('psycopg_binary')

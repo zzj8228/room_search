@@ -2,23 +2,11 @@
 from __future__ import annotations
 
 import http.server
-import json
-from pathlib import Path
-import sys
 import threading
-import urllib.parse
-import urllib.request
 import webbrowser
 
 from room_search import database, store
-from room_search.paths import ROOT
 from room_search.server import Handler
-
-
-def open_json(url):
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(url, timeout=5) as response:
-        return json.load(response)
 
 
 def make_server():
@@ -28,27 +16,7 @@ def make_server():
     return server, f"http://127.0.0.1:{server.server_port}"
 
 
-def smoke_test(destination):
-    server, url = make_server()
-    try:
-        meta = open_json(url + "/api/meta")
-        locations = open_json(url + "/api/locations")
-        search = open_json(url + "/api/search?date=2026-10-21&room=" + urllib.parse.quote("理教-307"))
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(url, timeout=5) as response:
-            html = response.read()
-        assert b"search-form" in html and meta["application"] == "pku-classroom"
-        Path(destination).write_text(json.dumps({"ok": True, "frozen": bool(getattr(sys, "frozen", False)),
-            "listen": "127.0.0.1", "totals": meta["totals"], "locations": len(locations["locations"]),
-            "sample_results": search["total"], "runtime_data": str(ROOT / "data")}, ensure_ascii=False), encoding="utf-8")
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == "--smoke-test":
-        return smoke_test(sys.argv[2])
     import tkinter as tk
     from tkinter import messagebox, simpledialog, ttk
     root = tk.Tk()

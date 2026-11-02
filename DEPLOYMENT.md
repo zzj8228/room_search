@@ -12,7 +12,159 @@
 
 EXE 包含 Python、psycopg、静态网页及 agent-browser 0.39.1 原生控制程序，不含环境安装器。只监听 `127.0.0.1`，端口自动选择。认证数据保存在 EXE 同目录的 `data/`；更换 Windows 用户后须重新配置数据库、重新登录。
 
-源码开发仍可使用 `setup.ps1` 和 `classroom.py`，详见 [REQUIREMENTS.md](REQUIREMENTS.md)。重建 EXE：在安装了 Python 3.13、agent-browser 0.39.1 的构建机运行 `powershell -ExecutionPolicy Bypass -File .\build-windows.ps1`。构建依赖只进入 `.build-venv/`，输出为根目录 `RoomSearch.exe`。打包资源使用白名单，不读取 `data/`、`.env` 或 SSH 文件。
+Windows 源码的安装、配置、启动和打包统一通过 `manage.ps1` 操作，`-Action` 可选 `Setup`、`Configure`、`Start`、`Build`，省略时启动源码服务。双击 `start-classroom.cmd` 等价于 `Start`。依赖版本集中在 `requirements.txt`。
+
+重建 EXE 需要构建机上的 Python 3.13 和 agent-browser 0.39.1。可按下方源码说明安装项目内的浏览器工具，然后执行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\manage.ps1 -Action Build
+```
+
+构建依赖只进入 `.build-venv/`，PyInstaller 固定为 6.19.0，输出为根目录 `RoomSearch.exe`。优先打包项目 `.tools/` 中的原生浏览器控制程序，也兼容构建机已有的全局安装。打包资源使用白名单，不读取 `data/`、`.env` 或 SSH 文件；不会启动应用或运行测试。
+
+## Windows：源码安装与配置
+
+所有命令均在项目根目录运行。Windows 安装操作只管理项目虚拟环境，不访问宝塔面板。
+
+### 需要哪些环境
+
+| 组件 | 要求与用途 |
+| --- | --- |
+| Python | 3.13 x64；应用依赖仅装入项目 `.venv` |
+| PostgreSQL | PostgreSQL 18（源库 18.4，服务器 18.6）；数据库可在本机或其他可连接服务器，不在 pip 中安装 |
+| Git | 克隆与更新代码；下载源码 ZIP 时可不用 |
+| 浏览器 | Edge、Chrome 等，用于访问本机查课页面 |
+| agent-browser | 官方登录时需要，使用 0.39.1；离线搜索无需此工具 |
+| Node.js / npm | 仅安装或运行浏览器工具时需要；agent-browser 0.39.1 声明要求 Node.js 24+ |
+| 校园网络 | 登录教学网、智云 SSO、同步目录时需要；查询已有数据只需连接 PostgreSQL |
+
+Python 依赖版本集中锁定在 `requirements.txt`。锁定版本为 `psycopg==3.3.6`、`psycopg-binary==3.3.6`、`tzdata==2026.6`。后端其余功能使用 Python 标准库，前端为原生 HTML/CSS/JavaScript，不需要前端构建。
+
+### 1. 获取项目并创建独立虚拟环境
+
+```powershell
+git clone https://github.com/zzj8228/room_search.git
+Set-Location room_search
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\manage.ps1 -Action Setup
+```
+
+仓库若为私有，需要先取得访问权限并完成自己的 GitHub 登录。`ExecutionPolicy Bypass` 仅作用于这次 PowerShell 进程，不修改系统策略。
+
+`manage.ps1 -Action Setup` 使用 Python 3.13 创建当前项目 `.venv`，安装锁定依赖并执行 `pip check`。不执行全局 pip/npm 安装，不需要激活虚拟环境。手动安装等价命令：
+
+```powershell
+py.exe -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -c "import sys; print(sys.executable); print(sys.prefix != sys.base_prefix)"
+```
+
+最后应输出本项目 `.venv\Scripts\python.exe` 和 `True`。不要复制其他项目的 `.venv`；如果已有 `.venv` 使用其他 Python 版本，停止本项目服务，将其改名留存，再重新运行安装脚本。
+
+`manage.ps1` 使用 ASCII 提示以兼容 Windows PowerShell 5.1；若添加中文，应保存为带 BOM 的 UTF-8。
+
+### 2. 创建独立 PostgreSQL 数据库
+
+已有本软件专用 `pku_classroom` 数据库时，直接进入第 3 步。全新安装需要先准备 PostgreSQL 服务；可使用已有服务器，安装脚本不会替你安装系统服务或修改其配置。
+
+使用管理员在 `psql` 中执行以下 SQL。用户名和库名是示例；`\password` 会交互设置密码，不把真实密码写入 SQL 文件：
+
+```sql
+CREATE ROLE room_search_app LOGIN;
+\password room_search_app
+CREATE DATABASE pku_classroom OWNER room_search_app ENCODING 'UTF8' TEMPLATE template0;
+```
+
+应用账号应拥有该数据库、可建立 `pku_room_search` schema 和表；日常运行不需要超级用户权限。`psycopg-binary` 自带数据库客户端组件，应用运行无需 `psql` 或编译器；上面的建库操作也可通过 PostgreSQL 管理工具完成。
+
+程序另提供 `classroom.py create-database --name pku_classroom`。此命令需要显式的 `PKU_CLASSROOM_ADMIN_DATABASE_URL`，其账号具备 `CREATEDB` 权限；创建出的库由该账号拥有。推荐采用上面的独立应用账号方式。
+
+### 3. 保存本项目数据库连接
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\manage.ps1 -Action Configure
+```
+
+在隐藏输入提示中输入自己的连接信息。例如下面只是格式示例，不是可直接使用的凭证：
+
+```text
+host=127.0.0.1 port=5432 dbname=pku_classroom user=room_search_app password='YOUR_DATABASE_PASSWORD'
+```
+
+连接验证成功后，配置加密保存在 `data/auth/postgres.dpapi`。目标数据库包含原回放表时命令会拒绝保存。DPAPI 文件绑定当前 Windows 用户，换机器或账号后应重新配置，不要复制别人的凭证文件。
+
+临时环境变量也可提供连接，优先于加密配置；不会自动读取 `.env` 文件。下表变量均属于本项目，普通安装只需要通过上面的交互命令保存数据库连接：
+
+| 变量 | 用途 |
+| --- | --- |
+| `PKU_CLASSROOM_DATABASE_URL` | 覆盖本项目数据库连接，仅在需要时设置 |
+| `PKU_CLASSROOM_DATA_DIR` | 更改数据/配置目录，默认项目 `data/` |
+| `PKU_CLASSROOM_ADMIN_DATABASE_URL` | 可选建库命令的显式管理连接 |
+| `PKU_CLASSROOM_IMPORT_DATABASE_URL` | 可选从旧回放库只读复制课表时的源连接 |
+| `PKU_ROOM_SCHEMA` | 高级选项，默认 `pku_room_search`，通常不改 |
+
+### 4. 启动软件
+
+双击 `start-classroom.cmd`，或执行：
+
+```powershell
+.\.venv\Scripts\python.exe classroom.py serve --port 8766
+```
+
+打开 <http://127.0.0.1:8766>。首次启动自动建立 schema、表和固定节次。新建空库没有课程属于正常情况，需要同步或导入；GitHub 仓库不携带本机的课表数据或数据库备份。
+
+命令行启动时按 Ctrl+C 结束。若双击启动器后服务已在后台运行，端口仍占用；应确认 `data/classroom-server.pid` 对应本项目进程后再停止它，不要终止其他软件的进程。使用其他端口时手动打开相应地址，双击启动器仍使用 8766。
+
+### 5. 配置独立登录工具（需要在线同步时）
+
+如果已有可用的 `agent-browser.cmd`，无需重复安装。否则在项目内部安装，不使用 `npm install -g`：
+
+```powershell
+npm.cmd --prefix .tools install --save-exact --no-audit --no-fund agent-browser@0.39.1
+& .\.tools\node_modules\.bin\agent-browser.cmd install
+```
+
+第一条命令将 npm 包安装到项目 `.tools/`，应用优先发现其中的 CLI；没有该文件才查找 PATH 中已有 CLI。第二条命令安装工具所需的浏览器资产，资产使用工具自身管理的用户缓存；不会安装全局 npm 包或改系统 PATH。若需完全限制安装目录，可先使用已有浏览器工具，或依据该工具对应版本的说明配置其浏览器位置。
+
+离线查询、首次建表和数据库配置都不依赖 Node.js 或 agent-browser。
+
+1. 在查课页面点击“登录教学网”，打开本项目专属的官方登录窗口。
+2. 在官方窗口完成登录，再返回查课页面点击“已完成登录”。
+3. 通过智云在线校验后，会话加密写入 `data/auth/pku-browser-state.dpapi`。
+4. 点击“同步所选日期”，或运行下面的命令：
+
+```powershell
+.\.venv\Scripts\python.exe classroom.py sync --from 2026-10-21 --to 2026-10-21
+```
+
+校园账号必须具有对应服务的访问权限；浏览器登录成功后仍需 SSO 与目录接口校验。本项目不读取 `pku_resource_gui` 的登录态，也不保存明文密码。网络或认证失败时保留已有课表。
+
+### 6. 可选：从现有回放库复制课表
+
+仅适用于已有与原项目兼容的 `pku_courses`、`pku_lessons`、`pku_catalog_days` 表。显式向当前进程提供 `PKU_CLASSROOM_IMPORT_DATABASE_URL` 后运行：
+
+```powershell
+.\.venv\Scripts\python.exe classroom.py import-existing
+Remove-Item Env:PKU_CLASSROOM_IMPORT_DATABASE_URL -ErrorAction SilentlyContinue
+```
+
+源连接应使用具有这些表读取权限的账号；导入事务为只读。目标和源必须是不同数据库。不复制媒体链接或认证数据。学期按课次日期重算，默认教室丢弃；默认只导入已配置校历最早日期及以后的数据。完整规则见 [README.md](README.md)。
+
+### 常见问题
+
+| 现象 | 检查方法 |
+| --- | --- |
+| 找不到 Python 3.13 | 检查 `py.exe -0p`；安装对应 Python 后重新运行 `manage.ps1 -Action Setup` |
+| PowerShell 拒绝执行脚本 | 使用第 1 步的进程级 `-ExecutionPolicy Bypass`，无需改全局策略 |
+| 缺少 psycopg | 确认用本项目 `.venv` 的 Python 执行，重跑 `manage.ps1 -Action Setup` |
+| 无法读取 PostgreSQL | 确认服务、主机、端口、库名、账号权限；重新执行 configure-database |
+| 无法解密配置 | 使用保存时的 Windows 用户，或重新配置/登录 |
+| 页面没有课程 | 检查所选日期是否已同步；空库、未覆盖日期不能解释为教室空闲 |
+| 找不到 agent-browser | 安装到项目 `.tools` 或使用 PATH 中已有 CLI；安装后重试登录 |
+| SSO 超时或会话过期 | 检查校园网、代理，再通过本项目官方窗口重新登录 |
+| 8766 端口被占用 | 检查已有本项目服务，或用 `serve --port 8767` 并手动访问 |
+
+`.venv/`、`.tools/`、`data/`、`.env`、数据库转储均由 Git 忽略。更新代码后重新运行 `manage.ps1 -Action Setup`；修改校历后重启服务，并执行 `classroom.py reclassify`。
 
 ## 当前服务器
 
@@ -31,7 +183,7 @@ EXE 包含 Python、psycopg、静态网页及 agent-browser 0.39.1 原生控制�
 | 管理员密码文件 | `/etc/room-search/admin-credentials.txt`，仅 root 可读 |
 | TLS 证书 | `/etc/room-search/tls.crt`、`tls.key` |
 
-PostgreSQL 18 的后续补丁版本可以恢复 18.4 的逻辑备份。不得用 Ubuntu 默认安装命令无意间装成其他主版本，也不要将 18 的备份直接恢复到较旧主版本。
+PostgreSQL 18 的后续补丁版本可以恢复 18.4 的逻辑备份。不得用 Ubuntu 默认安装命令无意间装成其他主版本，也不要将 18 的备份直接恢复到较旧主版本。安装入口会确认默认 Unix socket 连接的 PostgreSQL 主版本为 18；若系统已有其他版本占用默认连接，会停止，需先处理集群配置。
 
 以下宝塔命令**只在 Ubuntu 服务器执行**，不会访问或修改本机 Windows 宝塔。服务器使用宝塔自带 Python 项目管理器管理主查询服务及 `admin`、`desktop` 两个附加服务，开机自动启动；原 `room-search*` 应用 systemd 服务已停止并禁用。PostgreSQL 本身仍使用系统安装的 18.6。
 
@@ -44,13 +196,10 @@ PostgreSQL 18 的后续补丁版本可以恢复 18.4 的逻辑备份。不得用
 ```bash
 sudo git clone https://github.com/zzj8228/room_search.git /opt/room-search
 cd /opt/room-search
-sudo bash deploy/bootstrap.sh
-sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  xvfb x11vnc openbox novnc websockify fonts-noto-cjk
-sudo bash deploy/install.sh
+sudo bash deploy/install.sh install
 ```
 
-`bootstrap.sh` 添加 PostgreSQL 官方 PGDG 签名软件源，明确安装 PostgreSQL 18 与客户端、Python venv。`install.sh` 使用当前 Git 工作目录，建立独立服务用户和数据库、安装锁定的 Python 依赖、agent-browser 与 Chrome，并在缺失时生成管理密码和 TLS 证书。最后 `bt_register.py` 使用服务器宝塔自带管理器登记现有环境、Python 项目、附加服务与 PostgreSQL 接入连接，保留已有认证文件和 Nginx 配置。
+`deploy/install.sh install` 先确认 root 权限、Ubuntu 24.04 x64、代码目录和服务器宝塔环境，再添加 PostgreSQL 官方 PGDG 签名源，明确安装 PostgreSQL 18、客户端、Python venv 与远程登录桌面组件。随后建立独立服务用户和数据库、安装锁定的 Python 依赖、agent-browser 与 Chrome，并在缺失时生成管理密码和 TLS 证书。最后 `bt_register.py` 使用服务器宝塔自带管理器登记现有环境、Python 项目、附加服务与 PostgreSQL 接入连接，保留已有认证文件和 Nginx 配置。
 
 有私有课表备份时，可在空数据库的首次部署中指定：
 
@@ -89,7 +238,7 @@ Linux 会话使用 Fernet 加密，密钥为 `/var/lib/room-search/auth/secret.k
 
 ```bash
 # 通过宝塔管理器重启主服务与两个附加服务；也可在面板直接点击重启
-sudo /www/server/panel/pyenv/bin/python3 /opt/room-search/deploy/bt_manage.py restart
+sudo bash /opt/room-search/deploy/install.sh restart
 
 # 运行日志可在宝塔项目中查看，不输出原始 Cookie/JWT
 sudo tail -n 40 /www/wwwlogs/python/room-search/error.log
@@ -99,18 +248,16 @@ sudo -u roomsearch pg_dump -Fc --no-owner --no-acl \
   --schema=pku_room_search pku_classroom > classroom.dump
 ```
 
-当前服务器的 `/opt/room-search` 为 Git 工作目录。先在本地修改、验证并推送 GitHub，再在服务器拉取；默认不备份旧代码。以下命令均在服务器执行：
+当前服务器的 `/opt/room-search` 为 Git 工作目录。先在本地修改并推送 GitHub，再在服务器拉取；默认不备份旧代码。以下命令均在服务器执行：
 
 ```bash
 sudo git -C /opt/room-search status --short
-sudo bash /opt/room-search/deploy/update-bt.sh
-# 仅在 requirements*.txt 变化时更新依赖
-# sudo /opt/room-search/.venv/bin/pip install -r /opt/room-search/requirements.txt
+sudo bash /opt/room-search/deploy/install.sh update
 ```
 
-更新脚本拒绝覆盖服务器上的未提交改动；本次从复制部署迁移到 Git 部署时，已按管理员要求用仓库版本覆盖旧的复制代码，保留独立虚拟环境、浏览器与私有配置。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
+`update` 拒绝覆盖服务器上的未提交改动，使用 `git pull --ff-only` 后执行新版本的 `restart`。`restart` 安装 `requirements.txt` 依赖、离线补全院系，再通过宝塔重启；不会重新初始化数据库、证书或管理密码。本次从复制部署迁移到 Git 部署时，已按管理员要求用仓库版本覆盖旧的复制代码，保留独立虚拟环境、浏览器与私有配置。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
 
-从已有 systemd 部署迁移时，在核对 Git 代码并拉取后执行一次 `sudo /www/server/panel/pyenv/bin/python3 /opt/room-search/deploy/bt_register.py`。该脚本复用已有环境和配置，检测到同名的其他项目/数据库连接时停止，不创建代码副本。宝塔项目启动目录与代码目录分开，避免面板的目录属主调整影响 root 管理的浏览器文件。
+从已有 systemd 部署迁移时，在核对 Git 代码并拉取后执行一次 `sudo bash /opt/room-search/deploy/install.sh register`。该脚本复用已有环境和配置，检测到同名的其他项目/数据库连接时停止，不创建代码副本。宝塔项目启动目录与代码目录分开，避免面板的目录属主调整影响 root 管理的浏览器文件。
 
 更新脚本中的 `repair-departments` 离线补齐同一课程已有院系，无法推断的记录仍留空。管理员在网站完成教学网登录后，可重新同步受影响日期；也可执行下面的命令，只补全历史空院系。不要在终端粘贴 Cookie 或 JWT。
 

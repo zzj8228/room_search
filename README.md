@@ -17,15 +17,15 @@ EXE 已包含 Python 运行时、应用依赖、网页及登录浏览器控制�
 
 ## 打开
 
-完整的系统要求、PostgreSQL 建库、独立登录、虚拟环境安装及故障排查见 [REQUIREMENTS.md](REQUIREMENTS.md)。Python 依赖统一使用 `requirements.txt`，并引用 `requirements-lock.txt` 中的确定版本。
+完整的系统要求、PostgreSQL 建库、独立登录、虚拟环境安装及故障排查见 [DEPLOYMENT.md](DEPLOYMENT.md)。Python 依赖版本集中锁定在 `requirements.txt`；Windows 安装、配置、启动、打包统一使用 `manage.ps1`，Ubuntu 宝塔安装和更新统一使用 `deploy/install.sh`。
 
 本项目独立运行，所有 Python 命令均在项目根目录运行。首次配置环境：
 
 ```powershell
-.\setup.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\manage.ps1 -Action Setup
 ```
 
-脚本仅创建本项目 `.venv`，并将锁定依赖装入其中，不安装全局 Python/npm 包。也可手动使用已有 Python 3.13 创建 `.venv`，然后执行 `.\.venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements-lock.txt`。
+脚本仅创建本项目 `.venv`，并将锁定依赖装入其中，不安装全局 Python/npm 包。也可手动使用已有 Python 3.13 创建 `.venv`，然后执行 `.\.venv\Scripts\python.exe -m pip install --no-cache-dir -r requirements.txt`。
 
 双击 `start-classroom.cmd`，或在项目目录运行：
 
@@ -123,7 +123,7 @@ EXE 已包含 Python 运行时、应用依赖、网页及登录浏览器控制�
 3. 返回课表页面点击“已完成登录”。服务器从专属浏览器在内存中取得 Cookie，通过教学网本人课程入口建立智云 SSO，并在线验证目录访问成功后才加密保存会话；不会把原始 Cookie/JWT 写入日志。
 4. 点击“同步所选日期”，或执行下面的同步命令。会话过期后在本软件重新登录。
 
-登录接口为本服务的 `/api/auth/*`，独立端口 8766，浏览器会话名以本项目绝对路径计算，不带旧浏览器 profile，也不使用浏览器明文状态文件。登录成功关闭专属窗口；退出登录只删除本项目的校园会话并关闭该窗口，数据库和离线搜索保留。登录操作后台运行，页面轮询状态。优先使用项目 `.tools/node_modules/.bin/agent-browser.cmd`，再查找 PATH 中已有工具；本项目不会安装任何全局 npm 包。安装方法见 [REQUIREMENTS.md](REQUIREMENTS.md)。
+登录接口为本服务的 `/api/auth/*`，独立端口 8766，浏览器会话名以本项目绝对路径计算，不带旧浏览器 profile，也不使用浏览器明文状态文件。登录成功关闭专属窗口；退出登录只删除本项目的校园会话并关闭该窗口，数据库和离线搜索保留。登录操作后台运行，页面轮询状态。优先使用项目 `.tools/node_modules/.bin/agent-browser.cmd`，再查找 PATH 中已有工具；本项目不会安装任何全局 npm 包。安装方法见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 查询正常日期目录，不按是否存在回放筛选，不获取或下载视频。
 
@@ -153,7 +153,8 @@ EXE 已包含 Python 运行时、应用依赖、网页及登录浏览器控制�
 
 ## 项目结构
 
-- `classroom.py`：CLI；`start-classroom.cmd` / `.ps1`：本机启动器。
+- `classroom.py`：CLI；`manage.ps1`：Windows 安装/配置/启动/打包；`start-classroom.cmd`：双击启动入口。
+- `deploy/install.sh`：Ubuntu 宝塔统一部署入口（install/update/register/restart）；`DEPLOYMENT.md`：统一安装配置说明。
 - `room_search/model.py`、`semesters.json`：日期学期、节次、教室规范化。
 - `room_search/database.py`、`store.py`：独立 PostgreSQL 配置与事务查询/写入。
 - `room_search/auth.py`、`login.py`、`client.py`、`sync.py`：独立加密会话、浏览器登录、目录请求及按日同步。
