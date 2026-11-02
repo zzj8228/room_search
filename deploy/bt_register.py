@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import psutil
 import secrets
 import shlex
 import subprocess
@@ -137,7 +138,25 @@ def register():
     subprocess.run(["systemctl", "stop", "room-search", "room-search-admin", "room-search-desktop"], check=True)
     try:
         if row:
-            ServiceManager.new_mgr(PROJECT).stop_project()
+            previous = ServiceManager.new_mgr(PROJECT)
+            service_ids = {service["sid"] for service in previous.other_services}
+            previous.stop_project()
+            # Clean up children left by older native BT sidecar stop behavior.
+            descendants = []
+            for process in psutil.process_iter(["uids"]):
+                try:
+                    if process.info["uids"].real == account.pw_uid and process.environ().get("BT_PYTHON_SERVICE_SID") in service_ids:
+                        descendants.append(process)
+                        process.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            _gone, alive = psutil.wait_procs(descendants, timeout=3)
+            for process in alive:
+                try:
+                    process.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            time.sleep(0.5)
         if not row:
             checked(model.CreateProject(get), "创建宝塔 Python 项目")
         config = model._get_project_conf(PROJECT)
@@ -152,15 +171,24 @@ def register():
         generated_env = Path(model._env_path) / (PROJECT + ".env")
         os.chown(generated_env, 0, account.pw_gid)
         generated_env.chmod(0o640)
+        log_path = Path(config["logpath"])
+        log_path.parent.chmod(0o755)
+        log_path.mkdir(parents=True, exist_ok=True)
+        os.chown(log_path, account.pw_uid, account.pw_gid)
+        log_path.chmod(0o750)
+        log_file = log_path / "error.log"
+        log_file.touch(exist_ok=True)
+        os.chown(log_file, account.pw_uid, account.pw_gid)
+        log_file.chmod(0o600)
         for directory in (Path(model._env_path), Path(model._script_path),
                           Path("/www/server/python_project/service"),
                           Path("/www/server/python_project/service") / PROJECT):
             directory.mkdir(parents=True, exist_ok=True)
             directory.chmod(0o755)
         manager = ServiceManager.new_mgr(PROJECT)
-        for service in ({"name": "desktop", "command": "/bin/bash " + str(CODE / "deploy/desktop.sh"), "level": 5},
+        for service in ({"name": "desktop", "command": PYTHON + " " + str(CODE / "deploy/bt_desktop.py"), "level": 11},
                         {"name": "admin", "command": PYTHON + " " + str(CODE / "classroom.py") +
-                         " serve --port 8767 --admin-origin https://10.129.81.32", "level": 8}):
+                         " serve --port 8767 --admin-origin https://10.129.81.32", "level": 12}):
             existing = next((item for item in manager.other_services if item["name"] == service["name"]), None)
             error = manager.modify_service(existing["sid"], service) if existing else manager.add_service(service)
             if error:
