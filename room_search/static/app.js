@@ -1,10 +1,11 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const state = {meta: null, page: 1, response: null, sequence: 0, locations: [], syncing: false};
-const urlState = new URLSearchParams(location.search);
+const urlState = new URLSearchParams(location.search || history.state?.roomSearchFilters || "");
 const number = (n) => new Intl.NumberFormat("zh-CN").format(n);
 const adminPage = location.pathname.startsWith("/admin/");
 const pageBase = adminPage ? "/admin/" : "/";
+history.replaceState({roomSearchFilters: urlState.toString()}, "", pageBase);
 function element(tag, cls, content) {
   const node = document.createElement(tag); if (cls) node.className = cls;
   if (content !== undefined) node.textContent = content; return node;
@@ -145,7 +146,7 @@ async function search(page = 1) {
     const data = await api("/api/search?" + params);
     if (seq !== state.sequence) return;
     state.response = data;
-    history.replaceState(null, "", pageBase + "?" + params);
+    history.replaceState({roomSearchFilters: params.toString()}, "", pageBase);
     $("result-count").textContent = number(data.total) + " 课次";
     $("result-caption").textContent = $("date").value + " · " + ($("building").value || "全部教学楼") + " · " + ($("room").value || "全部教室");
     renderNotice(data); renderRows(data);
