@@ -135,6 +135,8 @@ def register():
     model.run_simple_prep_env = lambda _project_id, _values: (True, "existing environment reused")
     subprocess.run(["systemctl", "stop", "room-search", "room-search-admin", "room-search-desktop"], check=True)
     try:
+        if row:
+            ServiceManager.new_mgr(PROJECT).stop_project()
         if not row:
             checked(model.CreateProject(get), "创建宝塔 Python 项目")
         config = model._get_project_conf(PROJECT)
@@ -143,6 +145,15 @@ def register():
         if config.get("project_cmd") != get.project_cmd or config.get("user") != "roomsearch":
             raise RuntimeError("现有宝塔项目启动配置与本项目不一致，未覆盖。")
         model._main__prepare_start_conf(config, force=True)
+        # Native BT scripts must be readable/traversable by the existing service account.
+        generated_env = Path(model._env_path) / (PROJECT + ".env")
+        os.chown(generated_env, 0, account.pw_gid)
+        generated_env.chmod(0o640)
+        for directory in (Path(model._env_path), Path(model._script_path),
+                          Path("/www/server/python_project/service"),
+                          Path("/www/server/python_project/service") / PROJECT):
+            directory.mkdir(parents=True, exist_ok=True)
+            directory.chmod(0o755)
         manager = ServiceManager.new_mgr(PROJECT)
         for service in ({"name": "desktop", "command": "/bin/bash " + str(CODE / "deploy/desktop.sh"), "level": 5},
                         {"name": "admin", "command": PYTHON + " " + str(CODE / "classroom.py") +
@@ -204,7 +215,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
-    os.umask(0o077)
+    # Match BT's normal creation mode; credential files have explicit restrictive modes.
+    os.umask(0o022)
     with panel_context():
         result = project_status() if args.check else register()
         print(json.dumps(result, ensure_ascii=False))
