@@ -7,8 +7,8 @@ fi
 install -d -m 700 -o roomsearch -g roomsearch /var/lib/room-search
 install -d -m 755 /opt/room-search
 if [ "$source_dir" != /opt/room-search ]; then
-    tar -C "$source_dir" -cf - classroom.py requirements.txt requirements-lock.txt room_search deploy |
-        tar --no-same-owner -xf - -C /opt/room-search
+    echo 'Clone the repository into /opt/room-search and run its deploy/install.sh there.' >&2
+    exit 1
 fi
 python3 -m venv /opt/room-search/.venv
 /opt/room-search/.venv/bin/pip install --disable-pip-version-check -r /opt/room-search/requirements.txt
@@ -68,11 +68,9 @@ if not (directory / 'admin.htpasswd').exists():
     (directory / 'admin-credentials.txt').write_text('Management: https://10.129.81.32/admin/\nUsername: classroom_admin\nPassword: ' + password + '\n')
 PY
 install -m 644 /opt/room-search/deploy/room-search*.service /opt/room-search/deploy/room-search*.timer /etc/systemd/system/
-install -m 644 /opt/room-search/deploy/nginx.conf /www/server/panel/vhost/nginx/room-search.conf
-nginx -t
+if [ ! -f /www/server/panel/vhost/nginx/room-search.conf ] && [ ! -f /www/server/panel/vhost/nginx/python_room-search.conf ]; then
+    install -m 644 /opt/room-search/deploy/nginx.conf /www/server/panel/vhost/nginx/room-search.conf
+fi
 systemctl daemon-reload
-systemctl enable room-search.service room-search-desktop.service room-search-admin.service
-systemctl restart room-search.service room-search-desktop.service room-search-admin.service
-nginx -s reload
-systemctl is-active room-search.service room-search-desktop.service room-search-admin.service
+/www/server/panel/pyenv/bin/python3 /opt/room-search/deploy/bt_register.py
 sudo -u postgres psql -d pku_classroom -c 'SELECT count(*) AS lessons, count(DISTINCT room) AS rooms FROM pku_room_search.lessons;'

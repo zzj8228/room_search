@@ -7,7 +7,7 @@
 | 场景 | 启动方式 | 要求 |
 | --- | --- | --- |
 | Windows 本地使用 | 双击仓库根目录 `RoomSearch.exe` | Windows 10/11 x64、可连接的 PostgreSQL、已安装的 Edge 或 Chrome |
-| Ubuntu 校园网网站 | Nginx + systemd，详见 [DEPLOYMENT.md](DEPLOYMENT.md) | Ubuntu 24.04、PostgreSQL 18、宝塔 Nginx |
+| Ubuntu 校园网网站 | 宝塔 Python 项目 + Nginx，详见 [DEPLOYMENT.md](DEPLOYMENT.md) | Ubuntu 24.04、PostgreSQL 18、宝塔 Nginx |
 
 EXE 已包含 Python 运行时、应用依赖、网页及登录浏览器控制工具；不安装 Python、Node.js、数据库或其他环境。首次启动会要求输入本项目专用数据库连接串，使用当前 Windows 用户的 DPAPI 加密保存到 EXE 同目录的 `data/`。启动后自动打开本机网页，关闭启动窗口即停止服务。请将 EXE 放在有写入权限的目录中。
 

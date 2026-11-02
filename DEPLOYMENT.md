@@ -23,28 +23,34 @@ EXE 包含 Python、psycopg、静态网页及 agent-browser 0.39.1 原生控制�
 | 管理入口 | `https://10.129.81.32/admin/` |
 | 数据库 | PostgreSQL 18，当前安装 18.6；源数据库为 18.4 |
 | 代码 / 虚拟环境 | `/opt/room-search/`、`/opt/room-search/.venv/` |
+| 宝塔项目 | 网站 → Python 项目 → `room-search` |
+| 宝塔项目工作目录 | `/www/wwwroot/room-search/`，仅作为启动目录；代码仍在 `/opt/room-search/` |
 | 专用用户 / 数据库 | `roomsearch` / `pku_classroom` |
 | 私有运行数据 | `/var/lib/room-search/`，用户专属目录，权限 700 |
-| Nginx 站点配置 | `/www/server/panel/vhost/nginx/room-search.conf` |
+| Nginx 站点配置 | `/www/server/panel/vhost/nginx/python_room-search.conf` |
 | 管理员密码文件 | `/etc/room-search/admin-credentials.txt`，仅 root 可读 |
 | TLS 证书 | `/etc/room-search/tls.crt`、`tls.key` |
 
 PostgreSQL 18 的后续补丁版本可以恢复 18.4 的逻辑备份。不得用 Ubuntu 默认安装命令无意间装成其他主版本，也不要将 18 的备份直接恢复到较旧主版本。
+
+以下宝塔命令**只在 Ubuntu 服务器执行**，不会访问或修改本机 Windows 宝塔。服务器使用宝塔自带 Python 项目管理器管理主查询服务及 `admin`、`desktop` 两个附加服务，开机自动启动；原 `room-search*` 应用 systemd 服务已停止并禁用。PostgreSQL 本身仍使用系统安装的 18.6。
+
+宝塔“数据库 → PostgreSQL”通过 `127.0.0.1:5432` 的连接登记已有 `pku_classroom`，显示为本机系统 PostgreSQL 的接入连接；不安装第二套数据库。面板专用账号 `pku_classroom` 只有查询权限，密码在服务器生成并保存于宝塔私有配置中，应用继续使用原 `roomsearch` 的 Unix socket peer 认证。管理员的网页登录和同步由应用原有权限执行。
 
 ## 新服务器安装
 
 安装脚本面向 **Ubuntu 24.04 x64 + 宝塔 Nginx**，需要 sudo/root。使用其他 IP 或域名时，先修改 `deploy/nginx.conf` 的 `server_name`、两个应用 service 的来源地址，以及 `deploy/install.sh` 的证书地址。
 
 ```bash
-git clone https://github.com/zzj8228/room_search.git
-cd room_search
+sudo git clone https://github.com/zzj8228/room_search.git /opt/room-search
+cd /opt/room-search
 sudo bash deploy/bootstrap.sh
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
   xvfb x11vnc openbox novnc websockify fonts-noto-cjk
 sudo bash deploy/install.sh
 ```
 
-`bootstrap.sh` 添加 PostgreSQL 官方 PGDG 签名软件源，明确安装 PostgreSQL 18 与客户端、Python venv。`install.sh` 复制运行代码、建立独立服务用户和数据库、安装锁定的 Python 依赖、agent-browser 与 Chrome、生成管理密码和 TLS 证书，然后安装 systemd 与 Nginx 配置。数据库连接使用本机 Unix socket 的 peer 认证，不设置可公开使用的数据库密码。
+`bootstrap.sh` 添加 PostgreSQL 官方 PGDG 签名软件源，明确安装 PostgreSQL 18 与客户端、Python venv。`install.sh` 使用当前 Git 工作目录，建立独立服务用户和数据库、安装锁定的 Python 依赖、agent-browser 与 Chrome，并在缺失时生成管理密码和 TLS 证书。最后 `bt_register.py` 使用服务器宝塔自带管理器登记现有环境、Python 项目、附加服务与 PostgreSQL 接入连接，保留已有认证文件和 Nginx 配置。
 
 有私有课表备份时，可在空数据库的首次部署中指定：
 
@@ -59,7 +65,7 @@ sudo env ROOM_SEARCH_CATALOG_DUMP=/absolute/path/classroom.dump bash deploy/inst
 ```bash
 sudo -u postgres psql -Atc 'SHOW server_version;'
 sudo nginx -t
-sudo systemctl status room-search room-search-admin room-search-desktop
+sudo /www/server/panel/pyenv/bin/python3 /opt/room-search/deploy/bt_manage.py status
 curl http://127.0.0.1:8766/api/meta
 sudo cat /etc/room-search/admin-credentials.txt
 ```
@@ -82,37 +88,37 @@ Linux 会话使用 Fernet 加密，密钥为 `/var/lib/room-search/auth/secret.k
 ## 维护
 
 ```bash
-# 重启应用；公开查询与管理员界面分别运行
-sudo systemctl restart room-search room-search-admin
+# 通过宝塔管理器重启主服务与两个附加服务；也可在面板直接点击重启
+sudo /www/server/panel/pyenv/bin/python3 /opt/room-search/deploy/bt_manage.py restart
 
-# 查看应用日志；不输出原始 Cookie/JWT
-sudo journalctl -u room-search -u room-search-admin -n 80 --no-pager
+# 运行日志可在宝塔项目中查看，不输出原始 Cookie/JWT
+sudo tail -n 40 /www/wwwlogs/python/room-search/error.log
 
 # 仅导出课表 schema，不含校园登录态
 sudo -u roomsearch pg_dump -Fc --no-owner --no-acl \
   --schema=pku_room_search pku_classroom > classroom.dump
 ```
 
-当前服务器的 `/opt/room-search` 已登记为 Git 工作目录。更新时先在本地修改、验证并推送 GitHub，再在服务器备份并拉取。以下命令均在服务器执行：
+当前服务器的 `/opt/room-search` 为 Git 工作目录。先在本地修改、验证并推送 GitHub，再在服务器拉取；默认不备份旧代码。以下命令均在服务器执行：
 
 ```bash
-# 私有备份不放进项目目录或 GitHub
-sudo install -d -m 700 /var/backups/room-search
-sudo sh -c 'umask 077; sudo -u roomsearch pg_dump -Fc --no-owner --no-acl --schema=pku_room_search pku_classroom > /var/backups/room-search/before-update-$(date +%Y%m%d-%H%M%S).dump'
-
 sudo git -C /opt/room-search status --short
-sudo git -C /opt/room-search pull --ff-only origin main
+sudo bash /opt/room-search/deploy/update-bt.sh
 # 仅在 requirements*.txt 变化时更新依赖
 # sudo /opt/room-search/.venv/bin/pip install -r /opt/room-search/requirements.txt
-sudo -u roomsearch env PKU_CLASSROOM_DATABASE_URL='host=/var/run/postgresql dbname=pku_classroom user=roomsearch' \
-  /opt/room-search/.venv/bin/python /opt/room-search/classroom.py repair-departments
-sudo systemctl restart room-search room-search-admin
-curl --fail http://127.0.0.1:8766/api/meta
 ```
 
-如果 `git status` 显示服务器源码被修改，先核对差异，不要使用强制覆盖。原安装脚本复制文件形成的新部署需要先核对已部署文件，再将运行目录登记为 Git 工作目录；不能直接覆盖已有配置。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
+更新脚本拒绝覆盖服务器上的未提交改动；本次从复制部署迁移到 Git 部署时，已按管理员要求用仓库版本覆盖旧的复制代码，保留独立虚拟环境、浏览器与私有配置。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
 
-`repair-departments` 离线补齐同一课程已有院系，无法推断的记录仍留空。管理员在网站完成教学网登录后，可重新同步受影响日期；也可在上方环境变量命令后为 `repair-departments` 添加 `--online`，并同时设置 `PKU_CLASSROOM_DATA_DIR=/var/lib/room-search`，只查询排课接口补全历史空院系。不要在终端粘贴 Cookie 或 JWT。
+从已有 systemd 部署迁移时，在核对 Git 代码并拉取后执行一次 `sudo /www/server/panel/pyenv/bin/python3 /opt/room-search/deploy/bt_register.py`。该脚本复用已有环境和配置，检测到同名的其他项目/数据库连接时停止，不创建代码副本。宝塔项目启动目录与代码目录分开，避免面板的目录属主调整影响 root 管理的浏览器文件。
+
+更新脚本中的 `repair-departments` 离线补齐同一课程已有院系，无法推断的记录仍留空。管理员在网站完成教学网登录后，可重新同步受影响日期；也可执行下面的命令，只补全历史空院系。不要在终端粘贴 Cookie 或 JWT。
+
+```bash
+sudo -u roomsearch env PKU_CLASSROOM_DATABASE_URL='host=/var/run/postgresql dbname=pku_classroom user=roomsearch' \
+  PKU_CLASSROOM_DATA_DIR=/var/lib/room-search /opt/room-search/.venv/bin/python \
+  /opt/room-search/classroom.py repair-departments --online
+```
 
 仓库提供可选的 `room-search-sync.timer`，默认不启用；按需启用后在北京时间 06:30、12:30、19:30 更新昨日、今日和明日目录。过期会话需要管理员重新登录，任务失败保留原课表。
 
