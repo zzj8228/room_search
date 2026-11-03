@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from collections import Counter
 import http.server
 import json
 from pathlib import Path
@@ -17,24 +18,47 @@ JOBS = {}
 LOCK = threading.Lock()
 
 
-def launch_sync(day):
+def launch_sync(day=None, until_today=False):
+    end = today() if until_today else day
     with LOCK:
         if any(job["status"] == "running" for job in JOBS.values()):
             raise ValueError("已有同步任务正在运行，请等待完成。")
         job_id = uuid.uuid4().hex
         JOBS.clear()
-        JOBS[job_id] = {"id": job_id, "status": "running", "message": "准备同步", "date": str(day)}
+        JOBS[job_id] = {"id": job_id, "status": "running", "message": "准备同步", "date": str(end),
+                        "untilToday": until_today, "completed": 0, "total": 0}
     def update(**values):
         with LOCK:
             JOBS[job_id].update(values)
     def run():
+        completed = 0
+        active_day = None
         try:
             from .sync import sync_day
-            result = sync_day(day, lambda message: update(message=message))
+            days = store.pending_sync_dates(end) if until_today else [day]
+            update(total=len(days), firstDate=str(days[0]), lastDate=str(end))
+            accepted, missing = 0, 0
+            excluded = Counter()
+            for index, active_day in enumerate(days, 1):
+                def progress(message, current=active_day, position=index):
+                    update(message=f"{position}/{len(days)} · {current} · {message}")
+                result = sync_day(active_day, progress)
+                completed += 1
+                accepted += result["accepted"]
+                excluded.update(result["excluded"])
+                missing += result.get("departments", {}).get("missing_lessons", 0)
+                update(completed=completed)
+            if until_today:
+                result = {"days": completed, "firstDate": str(days[0]), "lastDate": str(end),
+                          "accepted": accepted, "excluded": dict(excluded),
+                          "departments": {"missing_lessons": missing}}
             update(status="done", message="同步完成", result=result)
         except Exception as error:
             from .auth import AuthError
             message = str(error) if isinstance(error, (AuthError, ValueError, RuntimeError)) else "同步失败，请检查网络与数据库。"
+            if until_today:
+                date_note = f"{active_day} 同步失败；" if active_day else ""
+                message = f"{date_note}{message} 已完成 {completed} 天，已保存的日期保留，可再次点击继续补齐。"
             update(status="failed", message=message)
     threading.Thread(target=run, daemon=True).start()
     return {"id": job_id}
@@ -137,7 +161,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except (ValueError, OSError):
                 pass
             return self.send(403, {"error": "仅允许本机同源访问。"})
-        if self.path not in ("/api/sync", "/api/auth/login", "/api/auth/complete", "/api/auth/logout"):
+        if self.path not in ("/api/sync", "/api/sync-until-today", "/api/auth/login", "/api/auth/complete", "/api/auth/logout"):
             return self.send(404, {"error": "接口不存在。"})
         if self.headers.get("Content-Type", "").split(";")[0] != "application/json":
             return self.send(415, {"error": "需要 JSON 请求。"})
@@ -153,6 +177,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 action = {"/api/auth/login": login.start, "/api/auth/complete": login.finish,
                           "/api/auth/logout": login.logout}[self.path]
                 return self.send(202, action())
+            if self.path == "/api/sync-until-today":
+                if not getattr(self.server, "admin_origin", None):
+                    return self.send(403, {"error": "同步至当前日期仅供管理员使用。"})
+                return self.send(202, launch_sync(until_today=True))
             day = dt.date.fromisoformat(body["date"])
             return self.send(202, launch_sync(day))
         except (ValueError, KeyError, TypeError) as error:

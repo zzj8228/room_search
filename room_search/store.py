@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import datetime as dt
 import json
 import os
 import re
@@ -224,6 +225,16 @@ def reclassify():
         result = conn.execute(f"UPDATE {S}.lessons SET term_id=CASE " +
                               " ".join(clauses) + " ELSE 'unknown' END", params)
     return {"reclassified": result.rowcount, "basis": "lesson_date"}
+
+
+def pending_sync_dates(end):
+    """Fill coverage gaps through end; always refresh end, even if already covered."""
+    with db.connection() as conn:
+        rows = conn.execute(f"SELECT lesson_date FROM {S}.days WHERE lesson_date<=%s", (end,)).fetchall()
+    covered = {row["lesson_date"] for row in rows}
+    first = min(covered, default=end)
+    return [day for offset in range((end - first).days + 1)
+            if (day := first + dt.timedelta(days=offset)) not in covered or day == end]
 
 
 def meta():

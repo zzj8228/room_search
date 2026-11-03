@@ -135,6 +135,8 @@ Ubuntu 网站管理端采用 IAAA 官方扫码登录，服务器通过 HTTPS 完
 
 页面“同步所选日期”在后台同步一天，显示任务状态；已有同步任务时不重复启动。详情学期标签不参与分类；只为缺少可复用院系的有效课程请求排课信息，每门课程在本次同步中最多请求一次。
 
+服务器管理员还可点击“同步至当前日期”，从最早已覆盖日期起补齐缺失日期到北京时间今天，跳过已覆盖的历史日期并刷新今天；空库只同步今天。批量任务显示进度，失败时保留已完成日期，可再次点击继续。此按钮与接口仅供管理员，普通访客不能调用。
+
 使用正常 `course-live/search-live-course-list`，参数为 `need_time_quantum=1`、`unique_course=1`、`with_sub_duration=1`、`search_time=日期`、`tenant=226`、`course_student_type=`、`sub_live_status=`、`with_sub_data=1`。展开时段及真实课次，按课程 ID+课次 ID 去重；子课次自己的地点优先于课程地点。不使用展示已删除内容的额外参数。
 
 当前数据库是智云目录的覆盖范围，不能保证包含智云没有收录的课程或线下临时调课。[教务部](https://dean.pku.edu.cn/service/web/courseSearch.php)和[选课系统](https://elective.pku.edu.cn)是补充核对入口，本版本没有把它们的学期周课表按假定周次展开成实际日期。
@@ -150,6 +152,7 @@ Ubuntu 网站管理端采用 IAAA 官方扫码登录，服务器通过 HTTPS 完
 - `mode=period&period_from=3&period_to=4`，或 `mode=range&start=10:00&end=12:00`。
 - `GET /api/search?...&page=2`：每页60课次，返回总数、当日覆盖与日期实际学期。
 - `POST /api/sync`：JSON 请求体 `{"date":"2026-10-31"}`，返回任务 ID。
+- `POST /api/sync-until-today`：仅管理模式接受，JSON `{}`；自动补齐缺失日期到北京时间今天，返回任务 ID。
 - `GET /api/job?id=任务ID`：本次进程内任务状态。
 
 默认仅监听 `127.0.0.1`，校验 Host、Origin、跨站请求；无跨站 CORS。前端用文本节点展示来源数据，不将课程名称当 HTML 执行。服务器模式仍只监听回环地址，由 Nginx 提供公开只读查询和受认证保护的管理入口；详见部署说明。不提供多用户校园账号托管。

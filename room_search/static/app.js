@@ -168,30 +168,40 @@ function chooseDateTerm() {
   $("term").value = term?.id || (state.meta.totals.unknown_terms ? "unknown" : "");
   updateTermNote(); loadLocations().catch((e) => message("error", e.message));
 }
-async function sync() {
+async function sync(untilToday = false) {
   if (state.syncing) return;
-  state.syncing = true; $("sync").disabled = true;
+  state.syncing = true;
+  for (const id of ["sync", "sync-until-today"]) $(id).disabled = true;
   const date = $("date").value;
-  $("sync-message").textContent = "正在同步 " + date + "…";
+  $("sync-message").textContent = untilToday ? "正在查找缺失日期，将同步至北京时间今天…" : "正在同步 " + date + "…";
   try {
-    const job = await api("/api/sync", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({date})});
+    const job = await api(untilToday ? "/api/sync-until-today" : "/api/sync", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(untilToday ? {} : {date})});
     let done = false;
     while (!done) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       const status = await api("/api/job?" + new URLSearchParams({id:job.id}));
-      $("sync-message").textContent = date + " · " + status.message;
+      $("sync-message").textContent = status.message;
       if (status.status === "failed") throw new Error(status.message);
       if (status.status === "done") {
         done = true; await refreshMeta();
-        $("sync-message").textContent = date + " 已同步：" + status.result.accepted + " 条有效课次，" + (status.result.excluded.placeholder_room || 0) + " 条默认教室已舍弃。";
+        const caption = untilToday ? "已同步至 " + status.result.lastDate + "，本次更新 " + status.result.days + " 天" : date + " 已同步";
+        $("sync-message").textContent = caption + "：" + status.result.accepted + " 条有效课次，" + (status.result.excluded.placeholder_room || 0) + " 条默认教室已舍弃。";
         if (status.result.departments?.missing_lessons) {
           $("sync-message").textContent += " " + status.result.departments.missing_lessons + " 条课次的院系待补充，可在登录有效时重新同步。";
         }
         await search();
       }
     }
-  } catch (error) { $("sync-message").textContent = "同步未完成：" + error.message + " 原数据保留。"; }
-  finally { state.syncing = false; $("sync").disabled = false; }
+  } catch (error) {
+    $("sync-message").textContent = "同步未完成：" + error.message + (untilToday ? "" : " 原数据保留。");
+    if (untilToday) {
+      try { await refreshMeta(); await search(); } catch (_) {}
+    }
+  }
+  finally {
+    state.syncing = false;
+    for (const id of ["sync", "sync-until-today"]) $(id).disabled = false;
+  }
 }
 function renderAuth(data) {
   const qrLogin = data.loginMethod === "iaaa-qr";
@@ -267,13 +277,16 @@ async function init() {
     $("date").value = parts.year + "-" + parts.month + "-" + parts.day; $("time").value = parts.hour + ":" + parts.minute;
     $("mode").value="time"; chooseDateTerm(); search();
   });
-  $("sync").addEventListener("click", sync);
+  $("sync").addEventListener("click", () => sync());
+  $("sync-until-today").addEventListener("click", () => sync(true));
   try {
     const meta = await api("/api/meta");
     document.querySelectorAll(".login-panel,.sync-panel").forEach((panel) => {panel.hidden = meta.readOnly;});
+    $("sync-until-today").hidden = !adminPage || meta.readOnly;
     if (adminPage) {
       document.title = "课表管理 · 北京大学";
       $("auth-help").textContent = "点击 IAAA 扫码登录，在北京大学 App 内确认授权后自动保存会话并同步。";
+      $("sync-help").textContent = "同步所选日期，或自动补齐已有覆盖范围内的缺失日期并同步至北京时间今天；今天的数据每次都会刷新。";
     }
     if (!meta.readOnly) {
       const sequence = authSequence;
