@@ -50,12 +50,14 @@ class QRLogin:
     def begin(self):
         self.request(BASE + "oauth.jsp?" + urllib.parse.urlencode(
             {"appID": APP_ID, "appName": "北京大学教学网", "redirectUrl": REGISTERED_REDIRECT}))
-        body, mime = self.request(BASE + "genQRCode.do?" + urllib.parse.urlencode(
+        body, _mime = self.request(BASE + "genQRCode.do?" + urllib.parse.urlencode(
             {"userName": "", "_rand": secrets.token_hex(12), "appId": APP_ID}), image=True)
-        if body.startswith(b"\x89PNG\r\n\x1a\n") and mime == "image/png":
-            return body, mime
-        if body.startswith(b"\xff\xd8\xff") and mime == "image/jpeg":
-            return body, mime
+        # IAAA can label its JPEG response as text/html. Recognize only supported
+        # raster signatures and serve a canonical MIME; never relay that header.
+        if body.startswith(b"\x89PNG\r\n\x1a\n"):
+            return body, "image/png"
+        if body.startswith(b"\xff\xd8\xff"):
+            return body, "image/jpeg"
         raise auth.AuthError("invalid_response", "IAAA 未返回有效二维码，请稍后重试。")
 
     def poll(self):
