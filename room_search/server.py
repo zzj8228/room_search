@@ -70,6 +70,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
@@ -93,8 +95,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if url.path == "/api/meta":
                 return self.send(200, {**store.meta(), "today": today(), "application": "pku-classroom",
                                        "readOnly": bool(getattr(self.server, "public_origin", None))})
-            if getattr(self.server, "public_origin", None) and url.path in ("/api/auth/status", "/api/job"):
+            if getattr(self.server, "public_origin", None) and (url.path.startswith("/api/auth/") or url.path == "/api/job"):
                 return self.send(404, {"error": "管理功能请通过服务器命令行使用。"})
+            if url.path == "/api/auth/qr":
+                from . import login
+                image = login.qr_image(query.get("attempt", ""))
+                if image is None:
+                    return self.send(404, {"error": "二维码不存在或已过期。"})
+                return self.send(200, image[0], image[1])
             if url.path == "/api/auth/status":
                 from . import login
                 return self.send(200, login.status())

@@ -34,10 +34,13 @@ install_dependencies() {
     /opt/room-search/.venv/bin/pip install --disable-pip-version-check -r /opt/room-search/requirements.txt
 }
 restart_project() {
+    # Registration also migrates older BT desktop sidecars and Nginx routes.
+    install -m 644 /opt/room-search/deploy/room-search*.service /opt/room-search/deploy/room-search*.timer /etc/systemd/system/
+    systemctl daemon-reload
     sudo -u roomsearch env PKU_CLASSROOM_DATABASE_URL='host=/var/run/postgresql dbname=pku_classroom user=roomsearch' \
         PKU_CLASSROOM_DATA_DIR=/var/lib/room-search \
         /opt/room-search/.venv/bin/python /opt/room-search/classroom.py repair-departments
-    "$panel_python" /opt/room-search/deploy/bt_manage.py restart
+    "$panel_python" /opt/room-search/deploy/bt_register.py
 }
 case "$action" in
     update)
@@ -66,8 +69,7 @@ curl --fail --show-error --silent https://www.postgresql.org/media/keys/ACCC4CF8
     -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
 printf '%s\n' 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' > /etc/apt/sources.list.d/pgdg.list
 apt-get update
-apt-get install -y postgresql-18 postgresql-client-18 python3-venv \
-    xvfb x11vnc openbox novnc websockify fonts-noto-cjk apparmor-utils openssl
+apt-get install -y postgresql-18 postgresql-client-18 python3-venv openssl
 systemctl enable --now postgresql
 postgres_version=$(sudo -u postgres psql -Atc 'SHOW server_version;')
 case "$postgres_version" in
@@ -95,21 +97,6 @@ if [ -n "${ROOM_SEARCH_CATALOG_DUMP:-}" ]; then
     sudo -u roomsearch pg_restore --exit-on-error --no-owner --no-acl --dbname=pku_classroom /var/lib/room-search/initial.dump
 fi
 sudo -u postgres psql -c "ALTER DATABASE pku_classroom SET timezone TO 'Asia/Shanghai';"
-install -d -m 755 /opt/room-search/.tools/bin
-if [ ! -x /opt/room-search/.tools/bin/agent-browser ]; then
-    curl --fail --show-error --silent --location https://registry.npmjs.org/agent-browser/-/agent-browser-0.39.1.tgz |
-        tar -xz -C /opt/room-search/.tools --strip-components=1 package/bin/agent-browser-linux-x64 package/skill-data
-    install -m 755 /opt/room-search/.tools/bin/agent-browser-linux-x64 /opt/room-search/.tools/bin/agent-browser
-fi
-sudo -u roomsearch env HOME=/var/lib/room-search AGENT_BROWSER_SKILLS_DIR=/opt/room-search/.tools/skill-data /opt/room-search/.tools/bin/agent-browser skills get core > /var/lib/room-search/browser-workflow.txt
-sudo -u roomsearch env HOME=/var/lib/room-search /opt/room-search/.tools/bin/agent-browser install
-browser_dir=$(find /var/lib/room-search/.agent-browser/browsers -mindepth 1 -maxdepth 1 -type d -name 'chrome-*' | sort -V | tail -n 1)
-test -x "$browser_dir/chrome"
-install -d -m 755 /opt/room-search/browser
-cp -a "$browser_dir/." /opt/room-search/browser/
-chown -R root:root /opt/room-search/browser
-install -m 644 /opt/room-search/deploy/room-search-chrome.apparmor /etc/apparmor.d/room-search-chrome
-apparmor_parser -r /etc/apparmor.d/room-search-chrome
 install -d -m 750 -o root -g www /etc/room-search
 if [ ! -f /etc/room-search/tls.key ]; then
     openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 365 \

@@ -1,9 +1,10 @@
-"""Independent visible official login; browser cookies stay in memory until encrypted."""
+"""Local official browser login and server-side IAAA QR authorization."""
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
+import secrets
 import subprocess
 import sys
 import threading
@@ -16,6 +17,7 @@ SESSION = "pku-classroom-login-" + hashlib.sha256(str(ROOT).encode()).hexdigest(
 LOCK = threading.RLock()
 STATE = {"status": "idle", "message": "同步课表前，请在本软件单独登录教学网。"}
 REMOTE = os.environ.get("PKU_CLASSROOM_REMOTE_LOGIN") == "1"
+QR = None
 
 
 def _browser(*arguments):
@@ -55,7 +57,69 @@ def _browser(*arguments):
 def status():
     with LOCK:
         return {**STATE, "auth": auth.auth_status(), "independent": True, "remoteLogin": REMOTE,
-                "loginUrl": "/admin/desktop/vnc.html?autoconnect=1&resize=scale&path=admin/desktop/websockify" if REMOTE else None}
+                "loginMethod": "iaaa-qr" if REMOTE else "local-browser",
+                "qrUrl": "/api/auth/qr?attempt=" + QR["id"] if QR and STATE["status"] == "waiting" else None}
+
+
+def qr_image(attempt):
+    with LOCK:
+        if (not REMOTE or not QR or STATE["status"] != "waiting"
+                or not secrets.compare_digest(attempt, QR["id"]) or time.monotonic() >= QR["deadline"]):
+            return None
+        return QR["image"]
+
+
+def _start_qr():
+    global QR
+    from .iaaa import QRLogin
+    with LOCK:
+        if STATE["status"] in ("opening", "verifying", "logging_out"):
+            raise ValueError("登录操作正在进行，请稍候。")
+        if STATE["status"] == "waiting":
+            return status()
+        attempt = {"id": secrets.token_urlsafe(24), "cancel": threading.Event(),
+                   "deadline": time.monotonic() + 180, "image": None}
+        QR = attempt
+        STATE.update(status="opening", message="正在向 IAAA 申请官方扫码二维码…")
+
+    def run():
+        global QR
+        session = QRLogin()
+        ticket = None
+        try:
+            image = session.begin()
+            with LOCK:
+                if attempt["cancel"].is_set() or QR is not attempt:
+                    return
+                attempt["image"] = image
+                STATE.update(status="waiting", message="请使用北京大学 App 扫码，并在手机上确认登录教学网。二维码三分钟内有效。")
+            while not attempt["cancel"].wait(3):
+                ticket = session.poll()
+                if ticket is None:
+                    continue
+                with LOCK:
+                    if attempt["cancel"].is_set() or QR is not attempt:
+                        return
+                    attempt["image"] = None
+                    STATE.update(status="verifying", message="扫码已确认，正在校验教学网与智云授权…")
+                session.complete(ticket)
+                ticket = None
+                with LOCK:
+                    STATE.update(status="done", message="扫码登录已通过校验，会话已加密保存。")
+                return
+        except Exception as error:
+            with LOCK:
+                if QR is attempt and not attempt["cancel"].is_set():
+                    STATE.update(status="failed", message=str(error) if isinstance(error, auth.AuthError) else "扫码登录未完成，请重试。")
+        finally:
+            ticket = None
+            session.close()
+            with LOCK:
+                attempt["image"] = None
+                if QR is attempt:
+                    QR = None
+    threading.Thread(target=run, daemon=True).start()
+    return status()
 
 
 def _job(phase, operation):
@@ -76,44 +140,18 @@ def _job(phase, operation):
 
 
 def start():
-    with LOCK:
-        if REMOTE and STATE["status"] == "waiting":
-            return status()
+    if REMOTE:
+        return _start_qr()
     def operation():
         _browser("--headed", "open", auth.HOME)
         with LOCK:
-            STATE.update(status="waiting", message="请在弹窗中完成官方登录，校验通过后自动保存并同步。" if REMOTE else
-                         "请在独立窗口完成官方登录，再点击“已完成登录”。")
-        if REMOTE:
-            threading.Thread(target=_watch_login, daemon=True).start()
+            STATE.update(status="waiting", message="请在独立窗口完成官方登录，再点击“已完成登录”。")
     return _job("opening", operation)
 
 
-def _watch_login():
-    deadline = time.monotonic() + 600
-    while time.monotonic() < deadline:
-        time.sleep(3)
-        with LOCK:
-            if STATE["status"] != "waiting":
-                return
-        try:
-            url = _browser("get", "url").strip()
-            if url.startswith("https://course.pku.edu.cn/webapps/portal/"):
-                finish()
-                return
-        except Exception:
-            continue
-    with LOCK:
-        if STATE["status"] != "waiting":
-            return
-        STATE.update(status="failed", message="登录窗口已超时，请重新打开登录。")
-    try:
-        _browser("close")
-    except Exception:
-        pass
-
-
 def finish():
+    if REMOTE:
+        raise ValueError("服务器使用 IAAA 扫码登录，手机确认后自动完成校验。")
     def operation():
         data = json.loads(_browser("cookies", "get", "--json"))
         payload = data.get("data", {})
@@ -132,13 +170,20 @@ def finish():
 
 def logout():
     def operation():
+        global QR
+        with LOCK:
+            if QR:
+                QR["cancel"].set()
+                QR["image"] = None
+                QR = None
         # Remove only this project's encrypted campus state, not its database config.
         with auth._lock:
             auth.AUTH_FILE.unlink(missing_ok=True)
-        try:
-            _browser("close")
-        except Exception:
-            pass
+        if not REMOTE:
+            try:
+                _browser("close")
+            except Exception:
+                pass
         with LOCK:
             STATE.update(status="idle", message="课表软件已退出登录。离线课表仍可查询。")
     return _job("logging_out", operation)

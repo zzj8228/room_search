@@ -13,7 +13,7 @@ EXE 已包含 Python 运行时、应用依赖、网页及登录浏览器控制�
 
 仓库不附带课表数据或账号。新数据库需要通过本人登录同步，或从私有备份恢复。EXE 的登录使用本机已安装的浏览器，不包含个人浏览器配置。源码运行方式和原有命令继续可用。
 
-校园网网站的公开页面仅支持查询；管理员通过 HTTPS 管理入口打开服务器独立浏览器，在官方教学网完成登录，校验成功后自动关闭弹窗、加密保存会话并同步所选日期。管理密码、Cookie、JWT、数据库配置及备份均不包含在仓库或 EXE 中。
+校园网网站的公开页面仅支持查询；管理员通过 HTTPS 管理入口显示 IAAA 官方二维码，使用北京大学 App 扫码确认；服务器校验成功后隐藏二维码、加密保存会话并同步所选日期。不使用 noVNC 或服务器远程桌面，也不在本站输入校园密码。管理密码、Cookie、JWT、数据库配置及备份均不包含在仓库或 EXE 中。
 
 ## 打开
 
@@ -116,6 +116,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\manage.ps1 -Action Set
 
 ## 独立登录与目录同步
 
+Ubuntu 网站管理端采用 IAAA 官方扫码登录，服务器通过 HTTPS 完成教学网与智云会话交换；三分钟二维码只在受保护的管理页显示，临时授权数据不落盘。详细流程、证书信任和凭证边界见 [DEPLOYMENT.md](DEPLOYMENT.md)。以下可见浏览器步骤适用于 Windows 本地使用。
+
 参考固定提交 `145f0319467b7dfead4f0c139d8d5885d6aeedd0` 的 `claspider/src/zhiyun.rs` 中 `fetch_day` 参数。认证实现借鉴 PKU Replay v0.2.3 的官方 SSO 流程，代码已复制并适配在本项目 `room_search/auth.py` 中独立维护；目录 HTTP 客户端是本项目的 `room_search/client.py`，不导入、不调用回放软件或其服务。
 
 1. 点击页面“登录教学网”，通过已安装的 `agent-browser.cmd` 打开本项目专属的可见浏览器会话。
@@ -139,7 +141,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\manage.ps1 -Action Set
 
 ## API
 
-- `GET /api/auth/status`：本项目会话状态，不返回 Cookie/令牌。
+- `GET /api/auth/status`：本项目会话状态，不返回 Cookie/令牌；服务器扫码时包含同源二维码资源地址。
+- `GET /api/auth/qr?attempt=随机标识`：服务器管理端的短时官方二维码，仅本次等待期间可读；公开查询端拒绝访问。
 - `POST /api/auth/login`、`/api/auth/complete`、`/api/auth/logout`：JSON `{}`，独立登录、验证保存、退出。
 - `GET /api/meta`：总量、学期、校历边界、节次与覆盖日期。
 - `GET /api/locations?term=2026-2027-1`：该学期教学楼和教室列表。
@@ -157,7 +160,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\manage.ps1 -Action Set
 - `deploy/install.sh`：Ubuntu 宝塔统一部署入口（install/update/register/restart）；`DEPLOYMENT.md`：统一安装配置说明。
 - `room_search/model.py`、`semesters.json`：日期学期、节次、教室规范化。
 - `room_search/database.py`、`store.py`：独立 PostgreSQL 配置与事务查询/写入。
-- `room_search/auth.py`、`login.py`、`client.py`、`sync.py`：独立加密会话、浏览器登录、目录请求及按日同步。
+- `room_search/auth.py`、`iaaa.py`、`login.py`、`client.py`、`sync.py`：独立加密会话、浏览器登录、目录请求及按日同步。
 - `room_search/server.py`、`static/`：本机 API 与中文界面。
 - `data/`、`.venv/`：本机私有数据和虚拟环境，均被 Git 忽略。
 

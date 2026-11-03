@@ -185,7 +185,7 @@ Remove-Item Env:PKU_CLASSROOM_IMPORT_DATABASE_URL -ErrorAction SilentlyContinue
 
 PostgreSQL 18 的后续补丁版本可以恢复 18.4 的逻辑备份。不得用 Ubuntu 默认安装命令无意间装成其他主版本，也不要将 18 的备份直接恢复到较旧主版本。安装入口会确认默认 Unix socket 连接的 PostgreSQL 主版本为 18；若系统已有其他版本占用默认连接，会停止，需先处理集群配置。
 
-以下宝塔命令**只在 Ubuntu 服务器执行**，不会访问或修改本机 Windows 宝塔。服务器使用宝塔自带 Python 项目管理器管理主查询服务及 `admin`、`desktop` 两个附加服务，开机自动启动；原 `room-search*` 应用 systemd 服务已停止并禁用。PostgreSQL 本身仍使用系统安装的 18.6。
+以下宝塔命令**只在 Ubuntu 服务器执行**，不会访问或修改本机 Windows 宝塔。服务器使用宝塔 Python 项目管理器管理主查询服务及 `admin` 附加服务，开机自动启动；原应用 systemd 服务禁用。服务器登录改用 IAAA 官方扫码接口，不使用 noVNC、远程桌面或服务器浏览器。PostgreSQL 本身仍使用系统安装的 18.6。
 
 宝塔“数据库 → PostgreSQL”通过 `127.0.0.1:5432` 的连接登记已有 `pku_classroom`，显示为本机系统 PostgreSQL 的接入连接；不安装第二套数据库。面板专用账号 `pku_classroom` 只有查询权限，密码在服务器生成并保存于宝塔私有配置中，应用继续使用原 `roomsearch` 的 Unix socket peer 认证。管理员的网页登录和同步由应用原有权限执行。
 
@@ -199,7 +199,7 @@ cd /opt/room-search
 sudo bash deploy/install.sh install
 ```
 
-`deploy/install.sh install` 先确认 root 权限、Ubuntu 24.04 x64、代码目录和服务器宝塔环境，再添加 PostgreSQL 官方 PGDG 签名源，明确安装 PostgreSQL 18、客户端、Python venv 与远程登录桌面组件。随后建立独立服务用户和数据库、安装锁定的 Python 依赖、agent-browser 与 Chrome，并在缺失时生成管理密码和 TLS 证书。最后 `bt_register.py` 使用服务器宝塔自带管理器登记现有环境、Python 项目、附加服务与 PostgreSQL 接入连接，保留已有认证文件和 Nginx 配置。
+`deploy/install.sh install` 先确认 root 权限、Ubuntu 24.04 x64、代码目录和服务器宝塔环境，再添加 PostgreSQL 官方 PGDG 签名源，明确安装 PostgreSQL 18、客户端、Python venv 与 OpenSSL。随后建立独立服务用户和数据库、安装锁定的 Python 依赖，并在缺失时生成管理密码和 TLS 证书。服务器无需安装 agent-browser、Chrome 或桌面组件。最后 `bt_register.py` 使用服务器宝塔自带管理器登记现有环境、Python 项目、附加服务与 PostgreSQL 接入连接，保留已有认证文件和 Nginx 配置。
 
 有私有课表备份时，可在空数据库的首次部署中指定：
 
@@ -219,25 +219,30 @@ curl http://127.0.0.1:8766/api/meta
 sudo cat /etc/room-search/admin-credentials.txt
 ```
 
-只有 80/443 需要供校园网访问。数据库 5432、查询后端 8766、管理后端 8767、远程桌面 5901 和 WebSocket 6080 都只监听回环地址，不应在安全组或防火墙中对外开放。
+只有 80/443 需要供校园网访问。数据库 5432、查询后端 8766、管理后端 8767 只监听回环地址，不应在安全组或防火墙中对外开放。旧桌面端口 5901/6080 不再使用，旧 `/admin/desktop/` 路径返回 404。
 
 ## 管理员登录与同步
 
-1. 访问 HTTPS 管理入口，输入服务器生成的管理账号密码。普通用户使用公开查询入口，无需校园账号。
-2. 当前使用内网 IP 自签名证书，浏览器首次会提示不受信任。先核对证书指纹；正式长期使用时可换成已申请域名与受信任证书。不要将管理页改回 HTTP。
-3. 选择希望同步的日期，点击“登录教学网”，允许该站点弹窗。
-4. 弹窗显示服务器专用浏览器的官方教学网页面。账号密码或扫码操作在该浏览器内完成；不是在本机获取 Cookie，也不是查课网站模仿的登录表单。
-5. 程序检测到官方教学网页面登录完成后，通过本人课程入口建立智云 SSO 并在线校验。成功后保存加密会话，关闭浏览器及弹窗，自动同步所选日期。
-6. 已有有效会话时可直接点击“同步所选日期”。会话过期则重新登录。退出登录只删除教学网会话，不删除课表数据。
+1. 通过 HTTPS 管理入口登录管理账号；公开查询页不提供登录和同步功能。
+2. 当前内网 IP 使用自签名证书。先通过可信渠道核对证书指纹并在设备上信任；不要跳过未知证书警告。IP 不变时可使用包含 IP SAN 的内部 CA 证书，但访问设备须信任该 CA。管理页不得使用 HTTP。
+3. 选择同步日期，点击“IAAA 扫码登录”，管理页直接显示 IAAA 官方生成的二维码。
+4. 使用“北京大学”App 扫描，并在手机上核对授权对象为北京大学教学网后确认。校园密码仅在官方 App 内处理，不在查课网站输入。
+5. 服务器轮询官方扫码结果，经 HTTPS 教学网回调建立会话，再通过本人课程入口完成智云 SSO 与在线校验。只有完整校验成功后才加密保存，页面自动隐藏二维码并同步所选日期。
+6. 二维码本地有效期三分钟；取消或超时后清除内存中的图片和临时 Cookie。刷新管理页可恢复显示仍有效的二维码；刷新后成功登录需要手动点击“同步所选日期”。已有有效会话时可直接同步，过期则重新扫码。
+7. “取消扫码”停止本次授权等待；“退出登录”删除本项目已保存的教学网会话，保留课表数据。取消本地等待不代表撤销已在官方 App 确认的其他会话。
 
-弹窗仅管理员可访问，十分钟未完成登录会自动结束。不要向他人分享管理密码、管理浏览器弹窗或远程桌面连接。当前设计为单个管理员维护共享课表，不是多用户校园账号托管平台。
+IAAA 使用教学网的既有 `blackboard` 应用配置与官方回调，网站自身没有申请通用 IAAA OAuth 应用。当前官方配置中的 redirect 值含历史 HTTP 地址，本项目仅把它作为官方协议参数传给 IAAA；实际携带票据的请求使用对应 HTTPS 回调，拒绝 HTTP 降级和非允许域名跳转。若校方更改接口、回调或验证要求，登录将停止；不会改为明文传输、请求粘贴 Cookie 或索取校园密码。
+
+二维码属于短时授权入口，只允许已认证的管理员读取，不可截图转发。服务器不向浏览器返回 IAAA 票据、Cookie、JWT 或上游原始响应；扫码图片、IAAA Cookie 和票据只在内存中暂存。只将经过校验的教学网与智云会话加密保存，不保存 IAAA 通用 SSO Cookie。管理路径关闭 Nginx 访问日志，API 与二维码响应禁用缓存并限制为同源读取；官方 HTTPS 连接使用系统 CA 校验。
+
+这是单个管理员维护共享课表的方案。服务器 root、宝塔管理员和掌握管理账号的人属于信任边界；本机加密无法抵御这些权限被攻破。不要分享管理密码、二维码或私有备份。
 
 Linux 会话使用 Fernet 加密，密钥为 `/var/lib/room-search/auth/secret.key`，权限 600、属于服务用户；Windows 继续使用用户绑定的 DPAPI。不要单独复制 Linux 会话而丢失密钥；也不要把密钥与会话备份放入公开目录。
 
 ## 维护
 
 ```bash
-# 通过宝塔管理器重启主服务与两个附加服务；也可在面板直接点击重启
+# 更新依赖并合并宝塔配置，重启主服务和 admin；也可在面板直接重启
 sudo bash /opt/room-search/deploy/install.sh restart
 
 # 运行日志可在宝塔项目中查看，不输出原始 Cookie/JWT
@@ -255,9 +260,9 @@ sudo git -C /opt/room-search status --short
 sudo bash /opt/room-search/deploy/install.sh update
 ```
 
-`update` 拒绝覆盖服务器上的未提交改动，使用 `git pull --ff-only` 后执行新版本的 `restart`。`restart` 安装 `requirements.txt` 依赖、离线补全院系，再通过宝塔重启；不会重新初始化数据库、证书或管理密码。本次从复制部署迁移到 Git 部署时，已按管理员要求用仓库版本覆盖旧的复制代码，保留独立虚拟环境、浏览器与私有配置。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
+`update` 拒绝覆盖服务器上的未提交改动，使用 `git pull --ff-only` 后执行新版本的 `restart`。`restart` 安装 `requirements.txt` 依赖、离线补全院系，随后重新登记宝塔项目：移除旧 desktop 附加服务、保留 admin，合并 Nginx 的旧桌面路由后重启。不会重新初始化数据库、证书或管理密码。本次从复制部署迁移到 Git 部署时，已按管理员要求用仓库版本覆盖旧的复制代码，保留独立虚拟环境与私有配置。修改 Nginx 后先执行 `sudo nginx -t`，成功后 `sudo nginx -s reload`。不要覆盖 `/var/lib/room-search` 或 `/etc/room-search`。
 
-从已有 systemd 部署迁移时，在核对 Git 代码并拉取后执行一次 `sudo bash /opt/room-search/deploy/install.sh register`。该脚本复用已有环境和配置，检测到同名的其他项目/数据库连接时停止，不创建代码副本。宝塔项目启动目录与代码目录分开，避免面板的目录属主调整影响 root 管理的浏览器文件。
+从已有 systemd 部署迁移时，在核对 Git 代码并拉取后执行一次 `sudo bash /opt/room-search/deploy/install.sh register`。该脚本复用已有环境和配置，检测到同名的其他项目/数据库连接时停止，不创建代码副本。旧版桌面服务会停止并从本项目中移除，保留其他软件可能使用的系统包；Nginx 只迁移已知桌面路由及管理日志/Referrer 设置，格式不符时停止而不覆盖。宝塔项目启动目录与代码目录分开，避免面板的目录属主调整影响 root 管理的代码。
 
 更新脚本中的 `repair-departments` 离线补齐同一课程已有院系，无法推断的记录仍留空。管理员在网站完成教学网登录后，可重新同步受影响日期；也可执行下面的命令，只补全历史空院系。不要在终端粘贴 Cookie 或 JWT。
 
@@ -272,8 +277,8 @@ sudo -u roomsearch env PKU_CLASSROOM_DATABASE_URL='host=/var/run/postgresql dbna
 ## 凭证与发布边界
 
 - 公开服务运行只读模式：拒绝所有写请求，不提供教学网登录状态或任务状态接口；管理服务只经 Nginx HTTPS + Basic Auth 访问。
-- 校验 Host、Origin 与跨站请求，登录弹窗 WebSocket 也必须来自管理站点；没有公开 CORS；前端将课程数据作为文本显示。
+- 校验 Host、Origin 与跨站请求，二维码接口仅管理站点可用；没有公开 CORS；前端将课程数据作为文本显示。
 - 登录 Cookie/JWT 在服务端校验后加密保存；API、网页、GitHub 和 EXE 均不返回这些值。应用不保存校园账号密码。
-- 数据库走本机 socket，服务用户无 PostgreSQL 超级用户权限；应用及桌面服务以专用普通用户运行。
+- 数据库走本机 socket，服务用户无 PostgreSQL 超级用户权限；应用以专用普通用户运行。
 - 发布内容不包含 `data/`、`.env`、`.dpapi`、`secret.key`、SSH 密钥、数据库备份、日志或管理员密码。
 - 服务器 root 和拥有管理入口访问权的人属于信任边界，应限制这些权限并妥善保管私有备份。

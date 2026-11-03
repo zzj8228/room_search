@@ -1,6 +1,7 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
 const state = {meta: null, page: 1, response: null, sequence: 0, locations: [], syncing: false};
+let authSequence = 0;
 const urlState = new URLSearchParams(location.search || history.state?.roomSearchFilters || "");
 const number = (n) => new Intl.NumberFormat("zh-CN").format(n);
 const adminPage = location.pathname.startsWith("/admin/");
@@ -193,30 +194,44 @@ async function sync() {
   finally { state.syncing = false; $("sync").disabled = false; }
 }
 function renderAuth(data) {
-  const busy = ["opening", "verifying", "logging_out"].includes(data.status) || (data.remoteLogin && data.status === "waiting");
+  const qrLogin = data.loginMethod === "iaaa-qr";
+  const changing = ["opening", "verifying", "logging_out"].includes(data.status);
+  const busy = changing || (qrLogin && data.status === "waiting");
   $("auth-message").textContent = data.status === "idle" && data.auth.saved ? data.auth.message : data.message;
-  for (const id of ["auth-login", "auth-complete", "auth-logout"]) $(id).disabled = busy;
+  $("auth-complete").hidden = qrLogin;
+  $("auth-login").textContent = qrLogin ? "IAAA 扫码登录" : "登录教学网";
+  $("auth-login").disabled = busy;
+  $("auth-complete").disabled = busy;
+  $("auth-logout").disabled = changing;
+  $("auth-logout").textContent = qrLogin && data.status === "waiting" ? "取消扫码" : "退出登录";
+  const showQR = qrLogin && data.status === "waiting" && data.qrUrl;
+  $("auth-qr-panel").hidden = !showQR;
+  if (showQR) {
+    const source = (adminPage ? "/admin" : "") + data.qrUrl;
+    if ($("auth-qr").getAttribute("src") !== source) $("auth-qr").src = source;
+  } else $("auth-qr").removeAttribute("src");
+  if (qrLogin) $("auth-help").textContent = "使用北京大学 App 扫描下方官方二维码，手机确认后自动保存会话并同步。无需在本站输入校园密码。";
   return busy;
 }
+async function watchAuth(data, action, sequence) {
+  while (sequence === authSequence && renderAuth(data)) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    if (sequence !== authSequence) return;
+    data = await api("/api/auth/status");
+  }
+  if (sequence !== authSequence) return;
+  if (data.status === "done" && ["login", "complete"].includes(action)) await sync();
+}
 async function authAction(action) {
-  let popup = null;
-  if (adminPage && action === "login") popup = window.open("about:blank", "pku-official-login", "width=1280,height=850");
+  const sequence = ++authSequence;
   for (const id of ["auth-login", "auth-complete", "auth-logout"]) $(id).disabled = true;
   try {
-    let data = await api("/api/auth/" + action, {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
-    if (popup && data.loginUrl) popup.location.replace(data.loginUrl);
-    while (renderAuth(data)) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      data = await api("/api/auth/status");
-    }
-    if (data.status === "done" && ["login", "complete"].includes(action)) {
-      if (popup && !popup.closed) popup.close();
-      await sync();
-    }
+    const data = await api("/api/auth/" + action, {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
+    await watchAuth(data, action, sequence);
   } catch (error) {
-    if (popup && !popup.closed) popup.close();
-    $("auth-message").textContent = error.message;
-  } finally {
+    if (sequence !== authSequence) return;
+    $("auth-qr-panel").hidden = true; $("auth-qr").removeAttribute("src");
+    $("auth-message").textContent = error.message + " 可刷新页面查看登录状态。";
     for (const id of ["auth-login", "auth-complete", "auth-logout"]) $(id).disabled = false;
   }
 }
@@ -258,9 +273,14 @@ async function init() {
     document.querySelectorAll(".login-panel,.sync-panel").forEach((panel) => {panel.hidden = meta.readOnly;});
     if (adminPage) {
       document.title = "课表管理 · 北京大学";
-      document.querySelector(".login-panel p:nth-of-type(2)").textContent = "点击登录教学网，在弹窗内完成官方登录；校验通过后自动关闭弹窗、保存会话并同步所选日期。";
+      $("auth-help").textContent = "点击 IAAA 扫码登录，在北京大学 App 内确认授权后自动保存会话并同步。";
     }
-    if (!meta.readOnly) api("/api/auth/status").then(renderAuth).catch((error) => {$("auth-message").textContent = error.message;});
+    if (!meta.readOnly) {
+      const sequence = authSequence;
+      api("/api/auth/status").then((data) => watchAuth(data, "resume", sequence)).catch((error) => {
+        if (sequence === authSequence) $("auth-message").textContent = error.message;
+      });
+    }
     for (const p of meta.periods) {
       $("period-from").add(new Option("第 " + p.number + " 节", p.number));
       $("period-to").add(new Option("第 " + p.number + " 节", p.number));

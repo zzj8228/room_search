@@ -10,12 +10,12 @@ import os
 from pathlib import Path
 import pwd
 import psutil
+import re
 import secrets
 import shlex
 import subprocess
 import sys
 import time
-import urllib.request
 
 from bt_manage import PROJECT, panel_context, project_status
 
@@ -32,11 +32,34 @@ def checked(result, operation):
         raise RuntimeError(operation + "失败；请检查服务器宝塔配置。")
 
 
+def migrate_nginx(target):
+    """Change only the old login routes; preserve site TLS and other local settings."""
+    text = target.read_text()
+    if "127.0.0.1:6080" in text:
+        for location in ("= /admin/desktop/websockify", "/admin/desktop/"):
+            pattern = r"(?m)^([ \t]*)location " + re.escape(location) + r" \{\n.*?^\1\}"
+            text, count = re.subn(pattern, "", text, flags=re.DOTALL)
+            if count != 1:
+                raise RuntimeError("旧 Nginx 桌面配置与已知格式不同，请在服务器面板核对后移除。")
+        if "127.0.0.1:6080" in text:
+            raise RuntimeError("Nginx 仍存在旧桌面代理，未覆盖配置。")
+    if "location /admin/desktop/" not in text:
+        marker = "    location = /admin { return 301 /admin/; }"
+        if text.count(marker) != 1:
+            raise RuntimeError("未找到 HTTPS 管理配置，未覆盖。")
+        text = text.replace(marker, marker + "\n    location /admin/desktop/ { return 404; }")
+    marker = "    location /admin/ {\n        auth_basic"
+    if marker in text:
+        text = text.replace(marker, "    location /admin/ {\n        access_log off;\n        auth_basic")
+    text = text.replace("add_header Referrer-Policy same-origin always;", "add_header Referrer-Policy no-referrer always;")
+    if text != target.read_text():
+        target.write_text(text)
+
+
 def runtime_environment():
-    values = {"HOME": str(RUNTIME), "DISPLAY": ":99", "PYTHONUNBUFFERED": "1",
+    values = {"HOME": str(RUNTIME), "PYTHONUNBUFFERED": "1",
               "PKU_CLASSROOM_DATABASE_URL": DATABASE, "PKU_CLASSROOM_DATA_DIR": str(RUNTIME),
               "PKU_CLASSROOM_REMOTE_LOGIN": "1",
-              "PKU_CLASSROOM_BROWSER_EXECUTABLE": str(CODE / "browser/chrome"),
               "PATH": str(CODE / ".tools/bin") + ":/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"}
     # The TLS/Basic-Auth directory belongs to Nginx; the application cannot traverse it.
     target = RUNTIME / "bt-runtime.env"
@@ -101,7 +124,7 @@ def register():
     from mod.project.python.pyenv_tool import EnvironmentManager
     from mod.project.python.serviceMod import ServiceManager
     for path in (CODE / "classroom.py", Path(PYTHON), PRIVATE / "admin.htpasswd", PRIVATE / "tls.crt",
-                 PRIVATE / "tls.key", CODE / "browser/chrome"):
+                 PRIVATE / "tls.key"):
         if not path.is_file():
             raise RuntimeError("缺少现有部署文件：" + str(path))
     account = pwd.getpwnam("roomsearch")
@@ -135,7 +158,10 @@ def register():
     system_users = model.get_system_user_list
     model.get_system_user_list = lambda: sorted(set(system_users()) | {account.pw_name})
     model.run_simple_prep_env = lambda _project_id, _values: (True, "existing environment reused")
-    subprocess.run(["systemctl", "stop", "room-search", "room-search-admin", "room-search-desktop"], check=True)
+    subprocess.run(["systemctl", "stop", "room-search", "room-search-admin"], check=True)
+    # Older deployments have a desktop unit; fresh installations no longer ship it.
+    subprocess.run(["systemctl", "disable", "--now", "room-search-desktop"], check=False,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         if row:
             previous = ServiceManager.new_mgr(PROJECT)
@@ -186,9 +212,13 @@ def register():
             directory.mkdir(parents=True, exist_ok=True)
             directory.chmod(0o755)
         manager = ServiceManager.new_mgr(PROJECT)
-        for service in ({"name": "desktop", "command": PYTHON + " " + str(CODE / "deploy/bt_desktop.py"), "level": 11},
-                        {"name": "admin", "command": PYTHON + " " + str(CODE / "classroom.py") +
-                         " serve --port 8767 --admin-origin https://10.129.81.32", "level": 12}):
+        desktop = next((item for item in manager.other_services if item["name"] == "desktop"), None)
+        if desktop:
+            error = manager.remove_service(desktop["sid"])
+            if error:
+                raise RuntimeError("移除旧宝塔远程桌面服务失败。")
+        for service in ({"name": "admin", "command": PYTHON + " " + str(CODE / "classroom.py") +
+                         " serve --port 8767 --admin-origin https://10.129.81.32", "level": 12},):
             existing = next((item for item in manager.other_services if item["name"] == service["name"]), None)
             error = manager.modify_service(existing["sid"], service) if existing else manager.add_service(service)
             if error:
@@ -210,26 +240,15 @@ def register():
             old.rename(target)
         elif not target.exists():
             target.write_bytes((CODE / "deploy/nginx.conf").read_bytes())
+        migrate_nginx(target)
         target.chmod(0o644)
         subprocess.run(["nginx", "-t"], check=True)
         ServiceManager.new_mgr(PROJECT).start_project()
         status = project_status()
-        if not status["running"] or len(status["services"]) != 3 or any(not item["pid"] for item in status["services"]):
+        if not status["running"] or len(status["services"]) != 2 or any(not item["pid"] for item in status["services"]):
             raise RuntimeError("宝塔项目或附加服务未启动。")
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        for url in ("http://127.0.0.1:8766/api/meta", "http://127.0.0.1:8767/api/meta", "http://127.0.0.1:6080/vnc.html"):
-            for attempt in range(10):
-                try:
-                    with opener.open(url, timeout=3) as response:
-                        if response.status != 200:
-                            raise RuntimeError("宝塔服务健康检查失败。")
-                    break
-                except OSError:
-                    if attempt == 9:
-                        raise RuntimeError("宝塔服务健康检查未通过。") from None
-                    time.sleep(0.5)
         subprocess.run(["nginx", "-s", "reload"], check=True)
-        subprocess.run(["systemctl", "disable", "room-search", "room-search-admin", "room-search-desktop"], check=True)
+        subprocess.run(["systemctl", "disable", "room-search", "room-search-admin"], check=True)
     except Exception:
         # Keep an existing deployment available if migration fails before completion.
         try:
@@ -237,7 +256,7 @@ def register():
             if not isinstance(manager, str):
                 manager.stop_project()
         finally:
-            subprocess.run(["systemctl", "start", "room-search-desktop", "room-search-admin", "room-search"], check=False)
+            subprocess.run(["systemctl", "start", "room-search-admin", "room-search"], check=False)
         raise
     return {"project": status, "database": database}
 
