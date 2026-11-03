@@ -48,6 +48,9 @@ class QRLogin:
         return body, mime
 
     def begin(self):
+        # Match the official entry flow: establish teaching-site cookies before
+        # asking IAAA for authorization, using the same in-memory cookie jar.
+        self.request(auth.HOME)
         self.request(BASE + "oauth.jsp?" + urllib.parse.urlencode(
             {"appID": APP_ID, "appName": "北京大学教学网", "redirectUrl": REGISTERED_REDIRECT}))
         body, _mime = self.request(BASE + "genQRCode.do?" + urllib.parse.urlencode(
@@ -87,6 +90,9 @@ class QRLogin:
     def complete(self, ticket):
         self.request(HTTPS_CALLBACK + "?" + urllib.parse.urlencode(
             {"_rand": secrets.token_hex(12), "token": ticket}))
+        # Blackboard's callback can be an empty 200 response. Visiting the portal
+        # completes session initialization; the SSO check below still proves auth.
+        self.request(auth.HOME)
         # IAAA SSO cookies are broader than needed. Persist only teaching cookies,
         # after the existing client has verified teaching -> Zhiyun authorization.
         state = auth.jar_state(self.cookies, {"cookies": [], "origins": []})
